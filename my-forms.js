@@ -206,6 +206,21 @@ async function openFormSubmissions(formItemId) {
   }
 }
 
+function filterSubmissionsInPlace(value) {
+  _subFilter = value;
+  const q = value.toLowerCase();
+  const tbody = document.querySelector("#submissions-tbody");
+  if (!tbody) return;
+  let visible = 0;
+  tbody.querySelectorAll("tr[data-searchtext]").forEach(row => {
+    const match = !q || row.dataset.searchtext.includes(q);
+    row.style.display = match ? "" : "none";
+    if (match) visible++;
+  });
+  const countEl = document.getElementById("sub-count");
+  if (countEl) countEl.textContent = `${visible} submission${visible !== 1 ? "s" : ""}`;
+}
+
 function renderSubmissionsTable(container) {
   const title = _currentFormItem?.fields?.Title || "Form";
   const allFields = (_currentFormDef?.sections || []).flatMap(s => s.fields || [])
@@ -287,9 +302,9 @@ function renderSubmissionsTable(container) {
 
     <div class="card">
       <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;">
-        <input class="input" style="max-width:280px;font-size:13px;padding:6px 10px;" placeholder="Search submissions…"
-          value="${_subFilter}" oninput="_subFilter=this.value;_subPage=1;renderSubmissionsTable(document.getElementById('main-content'))">
-        <span style="font-size:12.5px;color:var(--text2);margin-left:auto;">${total} submission${total !== 1 ? "s" : ""}</span>
+        <input id="sub-filter-input" class="input" style="max-width:280px;font-size:13px;padding:6px 10px;" placeholder="Search submissions…"
+          value="${_subFilter}" oninput="filterSubmissionsInPlace(this.value)">
+        <span id="sub-count" style="font-size:12.5px;color:var(--text2);margin-left:auto;">${total} submission${total !== 1 ? "s" : ""}</span>
       </div>
 
       <div class="table-wrap">
@@ -308,13 +323,17 @@ function renderSubmissionsTable(container) {
               <th style="width:120px;">Actions</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody id="submissions-tbody">
             ${safeHtml(!rows.length
               ? `<tr><td colspan="${visibleFields.length + (hasFileUpload ? 3 : 2)}" style="text-align:center;color:var(--text3);padding:32px;">No submissions found</td></tr>`
               : rows.map(item => {
                   const f = item.fields || {};
                   const hasAttachment = f.Attachments === true || f.Attachments === 1 || item.hasAttachments === true;
-                  return html`<tr style="cursor:pointer;" data-id="${item.id}"
+                  const searchText = [
+                    ...visibleFields.map(field => String(f[field.internalName || field.label] || "")).join(" "),
+                    formatDate(f.Modified)
+                  ].join(" ").toLowerCase();
+                  return html`<tr style="cursor:pointer;" data-id="${item.id}" data-searchtext="${searchText}"
                     onmouseover="this.style.background='#f0f4ff'" onmouseout="this.style.background=''">
                     ${safeHtml(visibleFields.map(field => html`
                       <td onclick="viewSubmission('${item.id}')">${formatFieldValue(f[field.internalName || field.label]).slice(0, 80)}</td>
