@@ -210,15 +210,9 @@ function filterSubmissionsInPlace(value) {
   _subFilter = value;
   const q = value.toLowerCase();
   const tbody = document.getElementById("submissions-tbody");
-  console.log("[filter] value:", value, "tbody:", tbody);
   if (!tbody) return;
-  const rows = tbody.querySelectorAll("tr[data-id]");
-  console.log("[filter] rows found:", rows.length);
-  rows.forEach((row, i) => {
-    console.log(`[filter] row ${i} _searchText:`, row._searchText, "dataset.searchtext:", row.dataset.searchtext);
-  });
   let visible = 0;
-  rows.forEach(row => {
+  tbody.querySelectorAll("tr[data-id]").forEach(row => {
     const match = !q || (row.dataset.searchtext || "").includes(q);
     row.style.display = match ? "" : "none";
     if (match) visible++;
