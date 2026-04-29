@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <script>
+    // GitHub Pages SPA redirect hack
+    // Redirects 404s back to index.html preserving the query string
+    const path = window.location.pathname.replace('/formstudio', '');
+    const search = window.location.search;
+    window.location.replace(
+      '/formstudio/' + (search ? search : '')
+    );
+  </script>
+</head>
+<body></body>
+</html>
