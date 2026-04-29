@@ -213,7 +213,7 @@ function filterSubmissionsInPlace(value) {
   if (!tbody) return;
   let visible = 0;
   tbody.querySelectorAll("tr[data-id]").forEach(row => {
-    const match = !q || (row.dataset.searchtext || "").includes(q);
+    const match = !q || (row._searchText || "").includes(q);
     row.style.display = match ? "" : "none";
     if (match) visible++;
   });
@@ -269,6 +269,17 @@ function renderSubmissionsTable(container) {
   _subPage         = Math.min(_subPage, totalPages);
   const start      = (_subPage - 1) * _subPageSize;
   const rows       = filtered.slice(start, start + _subPageSize);
+
+  // Build search text map: id -> lowercased concatenated field values
+  window._subSearchMap = {};
+  rows.forEach(item => {
+    const f = item.fields || {};
+    window._subSearchMap[item.id] = visibleFields
+      .map(field => String(f[field.internalName || field.label] || ""))
+      .concat(formatDate(f.Modified))
+      .join(" ")
+      .toLowerCase();
+  });
 
   const arrow = col => _subSortCol === col
     ? (_subSortAsc ? " ↑" : " ↓") : "";
@@ -329,11 +340,7 @@ function renderSubmissionsTable(container) {
               : rows.map(item => {
                   const f = item.fields || {};
                   const hasAttachment = f.Attachments === true || f.Attachments === 1 || item.hasAttachments === true;
-                  const searchText = [
-                    ...visibleFields.map(field => String(f[field.internalName || field.label] || "")),
-                    formatDate(f.Modified)
-                  ].join(" ").toLowerCase();
-                  return html`<tr style="cursor:pointer;" data-id="${item.id}" data-searchtext="${searchText}"
+                  return html`<tr style="cursor:pointer;" data-id="${item.id}"
                     onmouseover="this.style.background='#f0f4ff'" onmouseout="this.style.background=''">
                     ${safeHtml(visibleFields.map(field => html`
                       <td onclick="viewSubmission('${item.id}')">${formatFieldValue(f[field.internalName || field.label]).slice(0, 80)}</td>
@@ -379,6 +386,13 @@ function renderSubmissionsTable(container) {
       ` : "")}
     </div>
   `;
+  // Stamp search text directly onto DOM nodes — bypasses HTML escaping entirely
+  const tbody = document.getElementById("submissions-tbody");
+  if (tbody) {
+    tbody.querySelectorAll("tr[data-id]").forEach(row => {
+      row._searchText = window._subSearchMap[row.dataset.id] || "";
+    });
+  }
 }
 
 // =============================================================
