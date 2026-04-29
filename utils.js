@@ -1,0 +1,300 @@
+// Form Studio — Utilities, Boot & Theme
+
+// =============================================================
+// ADMIN LIVE MANAGEMENT
+// =============================================================
+async function renderAdminLive(container) {
+  if (!AppState.isAdmin) {
+    container.innerHTML = `<div class="empty-state"><h3>Access Denied</h3></div>`;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="flex items-center justify-between mb-4">
+      <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;">Live Form Management</h1>
+    </div>
+    <div class="card" id="admin-live-table">
+      <div style="padding:40px;text-align:center;"><span class="spinner"></span></div>
+    </div>
+  `;
+
+  try {
+    const items = await getListItems(CONFIG.FORMS_LIST);
+    const card = document.getElementById("admin-live-table");
+    if (!items.length) {
+      card.innerHTML = `<div class="empty-state"><h3>No live forms yet</h3></div>`;
+      return;
+    }
+
+    // Load JSON definitions in parallel to get access values (not a SP column)
+    const defs = await Promise.all(items.map(async item => {
+      try { return await getFormDefinition(CONFIG.FORMS_LIST, item.id); }
+      catch (_) { return null; }
+    }));
+
+    card.innerHTML = html`
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Form</th><th>List Name</th><th>Status</th><th>Access</th><th>Actions</th></tr></thead>
+          <tbody>
+            ${safeHtml(items.map((item, idx) => {
+              const f = item.fields || {};
+              const def = defs[idx];
+              const accessVal = def?.access || "";
+              const accessLabel = CONFIG.ACCESS_OPTIONS.find(a => a.value === accessVal)?.label || accessVal || "—";
+              return html`<tr>
+                <td><strong>${f.Title||"—"}</strong></td>
+                <td><span style="font-family:var(--mono);font-size:12px;color:var(--text2)">${f.ListName||"—"}</span></td>
+                <td>${safeHtml(statusBadge(f.Status||"—"))}</td>
+                <td style="color:var(--text2);font-size:13px;">${accessLabel}</td>
+                <td>
+                  ${safeHtml(f.Status === "Preview" ? html`
+                    <button class="btn btn-sm btn-primary" data-id="${item.id}" onclick="promoteToLive(this.dataset.id)">Promote to Live</button>
+                  ` : `<span style="font-size:12px;color:var(--text3);">Live</span>`)}
+                </td>
+              </tr>`;
+            }).join(""))}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch (e) {
+    document.getElementById("admin-live-table").innerHTML =
+      `<div class="empty-state"><p style="color:var(--red)">Error: ${escHtml(e.message)}</p></div>`;
+  }
+}
+
+async function promoteToLive(liveFormItemId) {
+  try {
+    await updateListItem(CONFIG.FORMS_LIST, liveFormItemId, { [CONFIG.COL_STATUS]: "Live" });
+    showToast("success", "Form promoted to Live");
+    renderAdminLive(document.getElementById("main-content"));
+  } catch (e) {
+    showToast("error", "Failed: " + e.message);
+  }
+}
+// =============================================================
+// USER MENU
+// =============================================================
+function showUserMenu() {
+  openModal(`
+    <div class="modal-header">
+      <span class="modal-title">Account</span>
+      <button class="btn btn-ghost btn-icon btn-sm" onclick="closeModal()">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 1l12 12M13 1L1 13"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="flex items-center gap-3">
+        <div class="avatar" style="width:40px;height:40px;font-size:16px;">${AppState.currentUser?.displayName.split(" ").map(n=>n[0]).join("").slice(0,2)||"?"}</div>
+        <div>
+          <div style="font-weight:500;">${escHtml(AppState.currentUser?.displayName||"")}</div>
+          <div style="font-size:12.5px;color:var(--text2)">${escHtml(AppState.currentUser?.email||"")}</div>
+        </div>
+      </div>
+      ${AppState.isAdmin ? `<div class="mt-2"><span class="badge badge-purple">Admin</span></div>` : ""}
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+      <button class="btn btn-secondary" onclick="closeModal();forceRefreshToken().then(()=>showToast('success','Token refreshed')).catch(e=>showToast('error',e.message))" title="Use this if you get Access Token errors">↻ Refresh Token</button>
+      <button class="btn btn-danger" onclick="logout()">Sign Out</button>
+    </div>
+  `);
+}
+// =============================================================
+// UTILITIES
+// =============================================================
+function getAllFields() {
+  return (AppState.builderForm.sections || []).flatMap(s => s.fields || []);
+}
+
+function getAllFieldsFromDef(def) {
+  return (def.sections || []).flatMap(s => s.fields || []);
+}
+
+function escHtml(str) {
+  if (str == null) return "";
+  return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+function escAttr(str) {
+  if (str == null) return "";
+  return String(str).replace(/'/g,"&#39;").replace(/"/g,"&quot;");
+}
+
+// =============================================================
+// TAGGED TEMPLATE LITERAL — auto-escaping HTML builder
+// Usage:  html`<div>${userValue}</div>`
+// All interpolated values are HTML-escaped automatically.
+// For deliberate raw HTML (e.g. InfoText sanitised by DOMPurify),
+// wrap the value: html`<div>${safeHtml(sanitised)}</div>`
+// =============================================================
+function safeHtml(value) {
+  // Marks a string as pre-sanitised — bypasses auto-escaping in html``
+  return { __safe: true, value: value == null ? "" : String(value) };
+}
+
+function html(strings, ...values) {
+  let out = strings[0];
+  for (let i = 0; i < values.length; i++) {
+    const val = values[i];
+    if (val == null) {
+      out += "";
+    } else if (val.__safe === true) {
+      out += val.value;                      // pre-sanitised — pass through as-is
+    } else if (Array.isArray(val)) {
+      out += val.join("");                   // already-rendered html`` segments
+    } else {
+      out += escHtml(String(val));           // escape everything else
+    }
+    out += strings[i + 1];
+  }
+  return out;
+}
+
+function formatDate(iso) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleDateString("en-GB", { day:"2-digit", month:"short", year:"numeric" });
+  } catch (_) { return "—"; }
+}
+
+function statusBadge(status) {
+  const map = {
+    "Draft":     "badge-gray",
+    "Created":   "badge-gray",
+    "Submitted": "badge-blue",
+    "Preview":   "badge-amber",
+    "Approved":  "badge-green",
+    "Rejected":  "badge-red",
+    "Live":      "badge-green",
+  };
+  return `<span class="badge ${map[status]||"badge-gray"}">${escHtml(status)}</span>`;
+}
+// =============================================================
+// BOOT
+// =============================================================
+async function bootApp() {
+  try {
+    // Get current user info
+    const me = await graphGet("/me?$select=displayName,mail,id");
+    AppState.currentUser = {
+      displayName: me.displayName || currentAccount.name,
+      email: me.mail || currentAccount.username,
+      id: me.id,
+    };
+
+    // Get SharePoint user ID for AuthorLookupId matching
+    try {
+      const siteId = await getSiteId();
+      const spUser = await graphGet(`/sites/${siteId}/lists('User Information List')/items?$filter=fields/EMail eq '${me.mail}'&$expand=fields`);
+      if (spUser.value?.[0]) {
+        AppState._currentUserSpId = parseInt(spUser.value[0].id);
+      }
+    } catch (_) {}
+
+    // Check permissions in parallel
+    const [adminStatus, formReadAccess, formWriteAccess] = await Promise.all([
+      checkIsAdmin(AppState.currentUser.displayName, AppState.currentUser.email),
+      checkListReadAccess(CONFIG.FORMS_LIST),
+      checkListWriteAccess(CONFIG.FORMS_LIST),
+    ]);
+
+    AppState.isAdmin = adminStatus;
+    AppState.hasFormRequestAccess = formReadAccess;
+    AppState.canCreateForms = formWriteAccess;
+
+    // Set initial view
+    AppState.currentView = "home";
+
+    renderAppShell();
+
+    // Handle deep links — e.g. ?view=my-forms&formId=abc123
+    const params = new URLSearchParams(window.location.search);
+    const deepView   = params.get("view");
+    const deepFormId = params.get("formId");
+    if (deepView === "my-forms" && deepFormId) {
+      // Navigate to my-forms view then drill straight into the form submissions
+      AppState.currentView = "my-forms";
+      renderAppShell();
+      openFormSubmissions(deepFormId);
+    } else if (deepView) {
+      navigateTo(deepView);
+    }
+  } catch (e) {
+    showToast("error", "Startup error: " + e.message);
+    renderAppShell(); // Render anyway with defaults
+  }
+}
+
+async function main() {
+  await initMsal();
+
+  const accounts = msalInstance.getAllAccounts();
+  if (accounts.length) {
+    currentAccount = accounts[0];
+    try { await getToken(); } catch (_) {}
+    await bootApp();
+  } else {
+    render();
+  }
+}
+
+// =============================================================
+// THEME SYSTEM
+// =============================================================
+const THEMES = ['uol','google','apple','dark','glass','pastel','candy','ocean','slate','hc','premium'];
+
+function setTheme(theme) {
+  if (!THEMES.includes(theme)) theme = 'uol';
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('fs-theme', theme);
+  // Sync select if it exists
+  const sel = document.getElementById('theme-select');
+  if (sel) sel.value = theme;
+}
+
+function loadTheme() {
+  const saved = localStorage.getItem('fs-theme') || 'uol';
+  setTheme(saved);
+}
+
+// Call immediately so theme applies before any render
+loadTheme();
+
+// =============================================================
+// Defer main() until MSAL is confirmed loaded
+function startApp() {
+  console.log("[FormStudio] startApp called, msal defined:", typeof msal !== "undefined");
+  if (typeof msal === "undefined") {
+    document.getElementById("app").innerHTML = `
+      <div style="padding:60px;text-align:center;color:var(--red);">
+        <h2>Startup Error</h2>
+        <pre style="margin-top:12px;font-size:12px;color:var(--text2);white-space:pre-wrap;">MSAL failed to load. The CDN script did not load — check that the server can reach unpkg.com.</pre>
+      </div>
+    `;
+    return;
+  }
+  main().catch(e => {
+    console.error("[FormStudio] main() error:", e);
+    document.getElementById("app").innerHTML = `
+      <div style="padding:60px;text-align:center;color:var(--red);">
+        <h2>Startup Error</h2>
+        <pre style="margin-top:12px;font-size:12px;color:var(--text2);white-space:pre-wrap;">${e.message}\n\n${e.stack||""}</pre>
+      </div>
+    `;
+  });
+}
+
+// Fallback: if startApp is never called (MSAL script blocked), show error after 5s
+setTimeout(() => {
+  const app = document.getElementById("app");
+  if (app && app.innerHTML.trim() === "") {
+    app.innerHTML = `
+      <div style="padding:60px;text-align:center;color:var(--red);">
+        <h2>Startup Error</h2>
+        <pre style="margin-top:12px;font-size:12px;color:#8891a8;white-space:pre-wrap;">The app did not start. Possible causes:\n- MSAL CDN script blocked by network/CSP\n- JavaScript error before startApp() fired\n\nOpen browser DevTools (F12) → Console for details.</pre>
+      </div>
+    `;
+  }
+}, 5000);
