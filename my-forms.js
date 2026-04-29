@@ -209,11 +209,17 @@ async function openFormSubmissions(formItemId) {
 function filterSubmissionsInPlace(value) {
   _subFilter = value;
   const q = value.toLowerCase();
-  const tbody = document.querySelector("#submissions-tbody");
+  const tbody = document.getElementById("submissions-tbody");
+  console.log("[filter] value:", value, "tbody:", tbody);
   if (!tbody) return;
+  const rows = tbody.querySelectorAll("tr[data-id]");
+  console.log("[filter] rows found:", rows.length);
+  rows.forEach((row, i) => {
+    console.log(`[filter] row ${i} _searchText:`, row._searchText, "dataset.searchtext:", row.dataset.searchtext);
+  });
   let visible = 0;
-  tbody.querySelectorAll("tr[data-searchtext]").forEach(row => {
-    const match = !q || row.dataset.searchtext.includes(q);
+  rows.forEach(row => {
+    const match = !q || (row.dataset.searchtext || "").includes(q);
     row.style.display = match ? "" : "none";
     if (match) visible++;
   });
