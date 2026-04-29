@@ -330,7 +330,7 @@ function renderSubmissionsTable(container) {
                   const f = item.fields || {};
                   const hasAttachment = f.Attachments === true || f.Attachments === 1 || item.hasAttachments === true;
                   const searchText = [
-                    ...visibleFields.map(field => String(f[field.internalName || field.label] || "")).join(" "),
+                    ...visibleFields.map(field => String(f[field.internalName || field.label] || "")),
                     formatDate(f.Modified)
                   ].join(" ").toLowerCase();
                   return html`<tr style="cursor:pointer;" data-id="${item.id}" data-searchtext="${searchText}"
