@@ -18,7 +18,7 @@ function initMsal() {
       // as a SPA redirect URI in your app registration.
       // postMessage-based redirect: MSAL opens popup, popup posts token back,
       // main window never navigates. The blank.html just needs to exist at this path.
-      redirectUri: "https://saqibmshabbir-eng.github.io/formstudio/",
+      redirectUri: "https://wsv-ndor2te.le.ac.uk/sharepoint-form-builder.html",
       navigateToLoginRequestUrl: false,
       postLogoutRedirectUri: "about:blank",
     },

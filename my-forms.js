@@ -206,21 +206,6 @@ async function openFormSubmissions(formItemId) {
   }
 }
 
-function filterSubmissionsInPlace(value) {
-  _subFilter = value;
-  const q = value.toLowerCase();
-  const tbody = document.getElementById("submissions-tbody");
-  if (!tbody) return;
-  let visible = 0;
-  tbody.querySelectorAll("tr[data-id]").forEach(row => {
-    const match = !q || (row._searchText || "").includes(q);
-    row.style.display = match ? "" : "none";
-    if (match) visible++;
-  });
-  const countEl = document.getElementById("sub-count");
-  if (countEl) countEl.textContent = `${visible} submission${visible !== 1 ? "s" : ""}`;
-}
-
 function renderSubmissionsTable(container) {
   const title = _currentFormItem?.fields?.Title || "Form";
   const allFields = (_currentFormDef?.sections || []).flatMap(s => s.fields || [])
@@ -270,17 +255,6 @@ function renderSubmissionsTable(container) {
   const start      = (_subPage - 1) * _subPageSize;
   const rows       = filtered.slice(start, start + _subPageSize);
 
-  // Build search text map: id -> lowercased concatenated field values
-  window._subSearchMap = {};
-  rows.forEach(item => {
-    const f = item.fields || {};
-    window._subSearchMap[item.id] = visibleFields
-      .map(field => String(f[field.internalName || field.label] || ""))
-      .concat(formatDate(f.Modified))
-      .join(" ")
-      .toLowerCase();
-  });
-
   const arrow = col => _subSortCol === col
     ? (_subSortAsc ? " ↑" : " ↓") : "";
 
@@ -313,9 +287,9 @@ function renderSubmissionsTable(container) {
 
     <div class="card">
       <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;">
-        <input id="sub-filter-input" class="input" style="max-width:280px;font-size:13px;padding:6px 10px;" placeholder="Search submissions…"
-          value="${_subFilter}" oninput="filterSubmissionsInPlace(this.value)">
-        <span id="sub-count" style="font-size:12.5px;color:var(--text2);margin-left:auto;">${total} submission${total !== 1 ? "s" : ""}</span>
+        <input class="input" style="max-width:280px;font-size:13px;padding:6px 10px;" placeholder="Search submissions…"
+          value="${_subFilter}" oninput="_subFilter=this.value;_subPage=1;renderSubmissionsTable(document.getElementById('main-content'))">
+        <span style="font-size:12.5px;color:var(--text2);margin-left:auto;">${total} submission${total !== 1 ? "s" : ""}</span>
       </div>
 
       <div class="table-wrap">
@@ -334,7 +308,7 @@ function renderSubmissionsTable(container) {
               <th style="width:120px;">Actions</th>
             </tr>
           </thead>
-          <tbody id="submissions-tbody">
+          <tbody>
             ${safeHtml(!rows.length
               ? `<tr><td colspan="${visibleFields.length + (hasFileUpload ? 3 : 2)}" style="text-align:center;color:var(--text3);padding:32px;">No submissions found</td></tr>`
               : rows.map(item => {
@@ -386,13 +360,6 @@ function renderSubmissionsTable(container) {
       ` : "")}
     </div>
   `;
-  // Stamp search text directly onto DOM nodes — bypasses HTML escaping entirely
-  const tbody = document.getElementById("submissions-tbody");
-  if (tbody) {
-    tbody.querySelectorAll("tr[data-id]").forEach(row => {
-      row._searchText = window._subSearchMap[row.dataset.id] || "";
-    });
-  }
 }
 
 // =============================================================

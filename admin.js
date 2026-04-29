@@ -6,17 +6,38 @@
 // Status flow: Draft → Submitted → Approved for Preview → Approved/Rejected
 // Approved items get Status set to "Preview" or "Live" after SP list creation.
 // =============================================================
+// =============================================================
+// COLUMN NAME SANITISATION
+// SharePoint internal column name rules:
+//   - ASCII alphanumeric and underscore only
+//   - Cannot start with a digit or underscore
+//   - Max 32 characters
+//   - No reserved names (Title, ID, etc. — SharePoint rejects duplicates)
+// =============================================================
+function sanitiseColumnName(label) {
+  return (label || "Field")
+    .normalize("NFD")                          // decompose accented chars (é → e + ́)
+    .replace(/[\u0300-\u036f]/g, "")          // strip accent marks
+    .replace(/[^a-zA-Z0-9]/g, "")             // strip everything non-alphanumeric
+    .replace(/^[0-9]+/, "")                   // strip leading digits
+    || "Field";                                // fallback if entirely stripped
+}
+
 async function renderAdminReview(container) {
-  if (!AppState.isAdmin) {
-    container.innerHTML = `<div class="empty-state"><h3>Access Denied</h3><p>You don't have admin access.</p></div>`;
+  // Authors with form request access can see this view too — not just admins
+  if (!AppState.isAdmin && !AppState.hasFormRequestAccess) {
+    container.innerHTML = `<div class="empty-state"><h3>Access Denied</h3><p>You don't have permission to view form requests.</p></div>`;
     return;
   }
 
-  container.innerHTML = `
+  const isAdmin = AppState.isAdmin;
+  const currentEmail = (AppState.currentUser?.email || "").toLowerCase();
+
+  container.innerHTML = html`
     <div class="flex items-center justify-between mb-4">
       <div>
-        <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;">Review Form Requests</h1>
-        <p style="color:var(--text2);font-size:13.5px;margin-top:2px;">Approve, preview, or reject submitted form definitions</p>
+        <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;">Form Requests</h1>
+        <p style="color:var(--text2);font-size:13.5px;margin-top:2px;">${isAdmin ? "Approve, preview, or reject submitted form definitions" : "Manage and submit your form requests"}</p>
       </div>
     </div>
     <div class="card" id="admin-table">
@@ -26,62 +47,169 @@ async function renderAdminReview(container) {
 
   try {
     const items = await getListItems(CONFIG.FORMS_LIST);
-    AppState.allRequests = items;
+
+    // Retro forms never appear in admin/author workflows
+    const nonRetro = items.filter(i => !i.fields?.[CONFIG.COL_RETRO]);
+
+    // Admins see everything except Created drafts from other authors.
+    // Authors see only their own forms (all statuses).
+    const visibleItems = nonRetro.filter(i => {
+      const s = i.fields?.[CONFIG.COL_STATUS] || "";
+      const createdByEmail = (i.createdBy?.user?.email || "").toLowerCase();
+      const isOwn = createdByEmail === currentEmail;
+      if (isAdmin) return s !== "Created" || isOwn;
+      return isOwn; // authors only see their own
+    });
+
+    AppState.allRequests = visibleItems;
     const card = document.getElementById("admin-table");
 
-    if (!items.length) {
-      card.innerHTML = `<div class="empty-state"><h3>No forms yet</h3></div>`;
+    if (!visibleItems.length) {
+      card.innerHTML = `<div class="empty-state"><h3>${isAdmin ? "No forms yet" : "You have no form requests yet"}</h3></div>`;
       return;
     }
 
-    card.innerHTML = `
+    card.innerHTML = html`
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Form</th><th>Submitter</th><th>Status</th><th>Modified</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Form</th><th>Creator</th><th>Status</th><th>Modified</th><th>Actions</th></tr></thead>
           <tbody>
-            ${items.map(item => {
+            ${safeHtml(visibleItems.map(item => {
               const f = item.fields || {};
-              const status = f[CONFIG.COL_STATUS] || "Draft";
+              const status = f[CONFIG.COL_STATUS] || "Created";
               const author = item.createdBy?.user?.displayName || "—";
-              const actions = CONFIG.STATUS_FLOW[status] || [];
               const createdByEmail = (item.createdBy?.user?.email || "").toLowerCase();
-              const currentEmail   = (AppState.currentUser?.email || "").toLowerCase();
-              const isAuthor       = createdByEmail && createdByEmail === currentEmail;
-              const canEdit        = (status === "Approved for Preview" || (status === "Preview" && AppState.isAdmin)) && (AppState.isAdmin || isAuthor);
-              return `<tr>
-                <td><strong>${escHtml(f.Title||"—")}</strong></td>
-                <td style="color:var(--text2);font-size:13px;">${escHtml(author)}</td>
-                <td>${statusBadge(status)}</td>
+              const isOwn = createdByEmail === currentEmail;
+
+              // Admin approval actions from STATUS_FLOW
+              const adminActions = isAdmin ? (CONFIG.STATUS_FLOW[status] || []) : [];
+
+              const isCreated   = status === "Created";
+              const isSubmitted = status === "Submitted";
+              const isPreview   = status === "Preview";
+              const isLocked    = ["Approved","Live","Rejected"].includes(status);
+
+              // Authors: Submit + Edit on Created only. Recall on Submitted only.
+              const canSubmit     = isOwn && isCreated;
+              const authorCanEdit = isOwn && isCreated;
+              const canRecall     = isOwn && isSubmitted;
+              // Admins: Edit on Submitted and Preview (Preview triggers warning)
+              const adminCanEdit  = isAdmin && (isSubmitted || isPreview);
+
+              const canEdit    = authorCanEdit || adminCanEdit;
+              const showLocked = isLocked && !adminActions.length;
+
+              return html`<tr>
+                <td>
+                  <strong>${f.Title||"—"}</strong>
+                  ${safeHtml(f[CONFIG.COL_COMMENTS] ? html`<div style="font-size:12px;color:var(--text3);margin-top:3px;font-style:italic;">${f[CONFIG.COL_COMMENTS]}</div>` : "")}
+                </td>
+                <td style="color:var(--text2);font-size:13px;">${author}</td>
+                <td>${safeHtml(statusBadge(status))}</td>
                 <td style="color:var(--text2);font-size:12.5px;">${formatDate(f.Modified)}</td>
                 <td>
-                  <div class="flex gap-2">
-                    <button class="btn btn-sm btn-ghost" onclick="adminPreviewForm('${item.id}','${escAttr(f.Title||"")}')">
+                  <div class="flex gap-2" style="flex-wrap:wrap;gap:6px;">
+                    <button class="btn btn-sm btn-ghost" data-id="${item.id}" data-title="${f.Title||""}" onclick="adminPreviewForm(this.dataset.id, this.dataset.title)">
                       <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="3"/><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/></svg>
                       View
                     </button>
-                    ${canEdit ? `
-                      <button class="btn btn-sm btn-secondary" onclick="editFormRequest('${item.id}')">
+                    ${safeHtml(canSubmit ? html`
+                      <button class="btn btn-sm btn-primary" data-id="${item.id}" onclick="submitRequest(this.dataset.id)">
+                        Submit
+                      </button>
+                    ` : "")}
+                    ${safeHtml(canRecall ? html`
+                      <button class="btn btn-sm btn-secondary" data-id="${item.id}" onclick="recallRequest(this.dataset.id)">
+                        Recall
+                      </button>
+                    ` : "")}
+                    ${safeHtml(canEdit ? html`
+                      <button class="btn btn-sm btn-secondary" data-id="${item.id}" data-preview="${isPreview}" data-created="${isCreated}" onclick="handleEditRequest(this)">
                         <svg width="12" height="12" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9.5 1.5l2 2-8 8H1.5v-2l8-8z"/></svg>
                         Edit
                       </button>
-                    ` : ""}
-                    ${actions.map(a => `
+                    ` : "")}
+                    ${safeHtml(adminActions.map(a => html`
                       <button class="btn btn-sm ${a==="Reject"?"btn-danger":"btn-secondary"}"
-                        onclick="adminChangeStatus('${item.id}','${a}')">
+                        data-id="${item.id}" data-action="${a}" onclick="adminChangeStatus(this.dataset.id, this.dataset.action)">
                         ${a}
                       </button>
-                    `).join("")}
-                    ${!actions.length && !canEdit ? `<span style="font-size:12px;color:var(--text3);">Locked</span>` : ""}
+                    `).join(""))}
+                    ${safeHtml(showLocked ? `<span style="font-size:12px;color:var(--text3);">Locked</span>` : "")}
+                    ${safeHtml((isPreview || status === "Live") && isAdmin ? html`
+                      <button class="btn btn-sm btn-ghost" data-id="${item.id}" title="Sync column names from SharePoint to fix submission errors"
+                        onclick="repairColumnNames(this.dataset.id)" style="color:var(--amber,#d97706);">
+                        ⚙ Repair
+                      </button>
+                    ` : "")}
                   </div>
                 </td>
               </tr>`;
-            }).join("")}
+            }).join(""))}
           </tbody>
         </table>
       </div>
     `;
   } catch (e) {
-    document.getElementById("admin-table").innerHTML = `<div class="empty-state"><p style="color:var(--red)">Error: ${escHtml(e.message)}</p></div>`;
+    document.getElementById("admin-table").innerHTML = html`<div class="empty-state"><p style="color:var(--red)">Error: ${e.message}</p></div>`;
+  }
+}
+
+// =============================================================
+// REPAIR COLUMN NAMES
+// Reads the actual SP list columns and patches internalName in the
+// JSON definition to match — fixes forms provisioned before the
+// "read-back SP name" fix was in place.
+// =============================================================
+async function repairColumnNames(itemId) {
+  showProgress("Repairing", "Reading form definition…");
+  try {
+    const def = await getFormDefinition(CONFIG.FORMS_LIST, itemId);
+    if (!def) throw new Error("Form definition not found");
+
+    const listName = def.listName;
+    if (!listName) throw new Error("No list name in form definition");
+
+    updateProgress("Reading SharePoint columns…");
+    const siteId = await getSiteId();
+    const listId = await getListId(listName);
+
+    // Fetch all columns from the SP list
+    const colsResp = await graphGet(`/sites/${siteId}/lists/${listId}/columns`);
+    const spColumns = colsResp.value || [];
+
+    // Build a lookup: displayName (lowercase) → actual internalName
+    const displayToInternal = {};
+    for (const col of spColumns) {
+      if (col.displayName && col.name) {
+        displayToInternal[col.displayName.toLowerCase()] = col.name;
+      }
+    }
+
+    // Patch each field's internalName using the SP column's actual name
+    let patchCount = 0;
+    const allFields = (def.sections || []).flatMap(s => s.fields || []);
+    for (const field of allFields) {
+      if (field.type === "InfoText" || field.type === "FileUpload") continue;
+      const spName = displayToInternal[field.label.toLowerCase()];
+      if (spName && spName !== field.internalName) {
+        console.log(`[Repair] "${field.label}": "${field.internalName}" → "${spName}"`);
+        field.internalName = spName;
+        patchCount++;
+      } else if (!field.internalName && spName) {
+        field.internalName = spName;
+        patchCount++;
+      }
+    }
+
+    updateProgress("Saving repaired definition…");
+    await uploadJsonAttachment(CONFIG.FORMS_LIST, itemId, "form-definition.json", def);
+
+    hideProgress();
+    showToast("success", `Column names repaired — ${patchCount} field${patchCount !== 1 ? "s" : ""} updated.`);
+  } catch (e) {
+    hideProgress();
+    showToast("error", "Repair failed: " + e.message);
   }
 }
 
@@ -142,6 +270,7 @@ async function adminPreviewForm(itemId, title) {
       </div>
     ` : `<div class="empty-state" style="padding:40px 0;"><p style="color:var(--text2);">No sections defined yet.</p></div>`;
 
+    const comment = item?.fields?.[CONFIG.COL_COMMENTS] || "";
     const allFields = sections.flatMap(s => s.fields || []).filter(f => f.type !== "InfoText");
     const summaryHtml = `
       <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:20px;display:flex;flex-wrap:wrap;gap:16px 32px;">
@@ -151,19 +280,25 @@ async function adminPreviewForm(itemId, title) {
         <div><span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);">Submission</span><br><strong>${def.submissionType === "SubmitEdit" ? "Submit & Edit" : "Submit Only"}</strong></div>
         <div><span style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);">Access</span><br><strong>${CONFIG.ACCESS_OPTIONS.find(a=>a.value===def.access)?.label || def.access || "—"}</strong></div>
       </div>
+      ${comment ? `
+        <div style="background:rgba(0,33,71,0.04);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:20px;">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);margin-bottom:6px;">Admin Comment</div>
+          <div style="font-size:13.5px;color:var(--text);line-height:1.6;">${escHtml(comment)}</div>
+        </div>
+      ` : ""}
     `;
 
     body.innerHTML = summaryHtml + previewHtml;
 
     if (footer && actions.length) {
-      footer.innerHTML = `
+      footer.innerHTML = html`
         <button class="btn btn-ghost" onclick="closeModal()">Close</button>
-        ${actions.map(a => `
+        ${safeHtml(actions.map(a => html`
           <button class="btn btn-sm ${a==="Reject"?"btn-danger":"btn-primary"}"
-            onclick="closeModal();adminChangeStatus('${itemId}','${a}')">
+            data-id="${itemId}" data-action="${a}" onclick="closeModal();adminChangeStatus(this.dataset.id, this.dataset.action)">
             ${a}
           </button>
-        `).join("")}
+        `).join(""))}
       `;
     }
   } catch (e) {
@@ -176,8 +311,44 @@ async function adminPreviewForm(itemId, title) {
 // EDIT A PREVIEW-STAGE FORM
 // Deletes the item entirely, opens the definition in a fresh builder
 // =============================================================
+function handleEditRequest(el) {
+  const id = el.dataset.id;
+  const isPreview = el.dataset.preview === "true";
+  const isCreated = el.dataset.created === "true";
+  if (isPreview) editPreviewFormRequest(id);
+  else if (isCreated) doEditFormRequest(id); // Never been submitted — no warning needed
+  else editFormRequest(id);
+}
+
+async function editPreviewFormRequest(itemId) {
+  openModal(html`
+    <div class="modal-header">
+      <span class="modal-title">⚠️ Warning — Form is in Preview</span>
+      <button class="btn btn-ghost btn-icon btn-sm" onclick="closeModal()">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 1l12 12M13 1L1 13"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:14px;line-height:1.7;">This form is currently in Preview and may already have users testing it. Editing will:</p>
+      <ul style="margin:12px 0 0 20px;font-size:13.5px;line-height:2.2;color:var(--text2);">
+        <li><strong style="color:var(--red);">Delete the SharePoint data list and all submissions within it</strong></li>
+        <li>Reset the form back to Created — the author will need to re-submit for review</li>
+        <li>Require re-approval before the form goes live again</li>
+      </ul>
+      <div style="margin-top:16px;padding:12px 14px;background:rgba(220,38,38,0.06);border:1px solid rgba(220,38,38,0.2);border-radius:var(--radius-sm);">
+        <strong style="font-size:13px;color:var(--red);">This cannot be undone.</strong>
+        <span style="font-size:13px;color:var(--text2);"> Export any submitted data before continuing.</span>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-danger" data-id="${itemId}" onclick="closeModal();doEditFormRequest(this.dataset.id)">I understand — Edit anyway</button>
+    </div>
+  `);
+}
+
 async function editFormRequest(itemId) {
-  openModal(`
+  openModal(html`
     <div class="modal-header">
       <span class="modal-title">⚠️ Warning — Data Will Be Lost</span>
       <button class="btn btn-ghost btn-icon btn-sm" onclick="closeModal()">
@@ -188,7 +359,7 @@ async function editFormRequest(itemId) {
       <p style="font-size:14px;line-height:1.7;">Editing this form definition will:</p>
       <ul style="margin:12px 0 0 20px;font-size:13.5px;line-height:2.2;color:var(--text2);">
         <li><strong style="color:var(--red);">Delete the SharePoint data list and all submissions within it</strong></li>
-        <li>Remove this form entry — you will re-submit for review</li>
+        <li>Reset the form back to Created — the author will need to re-submit for review</li>
         <li>Require re-approval before the form goes live again</li>
       </ul>
       <div style="margin-top:16px;padding:12px 14px;background:rgba(220,38,38,0.06);border:1px solid rgba(220,38,38,0.2);border-radius:var(--radius-sm);">
@@ -198,7 +369,7 @@ async function editFormRequest(itemId) {
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-danger" onclick="closeModal();doEditFormRequest('${itemId}')">I understand — Edit anyway</button>
+      <button class="btn btn-danger" data-id="${itemId}" onclick="closeModal();doEditFormRequest(this.dataset.id)">I understand — Edit anyway</button>
     </div>
   `);
 }
@@ -226,22 +397,26 @@ async function doEditFormRequest(itemId) {
       }
     }
 
-    // Delete the Forms list item itself
-    updateProgress("Removing form entry…");
+    // Reset the Forms item back to Created rather than deleting it —
+    // the author edits in place and re-submits. Clear ListName so there
+    // is no stale reference to the deleted data list.
+    updateProgress("Resetting form entry…");
     try {
-      const siteId   = await getSiteId();
-      const formsListId = await getListId(CONFIG.FORMS_LIST);
-      await graphDelete(`/sites/${siteId}/lists/${formsListId}/items/${itemId}`);
+      await updateListItem(CONFIG.FORMS_LIST, itemId, {
+        [CONFIG.COL_STATUS]:   "Created",
+        [CONFIG.COL_LISTNAME]: "",
+        [CONFIG.COL_COMMENTS]: "",
+      });
     } catch (e) {
-      console.warn("Could not delete Forms item:", e.message);
+      console.warn("Could not reset Forms item:", e.message);
     }
 
     hideProgress();
 
-    // Load definition into a fresh builder — new item created on re-submit
+    // Load definition into the builder for editing — item already exists, update on re-submit
     resetBuilderForm();
-    AppState.builderMode                    = "create";
-    AppState.builderItemId                  = null;
+    AppState.builderMode                    = "edit";
+    AppState.builderItemId                  = itemId;
     AppState.builderForm.title              = def.title              || "";
     AppState.builderForm.listName           = def.listName           || generateListName(def.title);
     AppState.builderForm.access             = def.access             || "StaffStudents";
@@ -251,9 +426,10 @@ async function doEditFormRequest(itemId) {
     AppState.builderForm.conditions         = def.conditions         || [];
     AppState.builderForm.dependentDropdowns = def.dependentDropdowns || [];
     AppState.builderForm.specificPeople     = def.specificPeople     || [];
+    AppState.builderForm.formManagers       = def.formManagers       || [];
 
     renderBuilder(main);
-    showToast("info", "Old entry removed — edit and re-submit for review when ready");
+    showToast("info", "Data list removed — edit and re-submit for review when ready");
 
   } catch (e) {
     hideProgress();
@@ -267,11 +443,57 @@ async function doEditFormRequest(itemId) {
 // =============================================================
 async function adminChangeStatus(itemId, actionLabel) {
   const newStatus = CONFIG.STATUS_ACTION_MAP[actionLabel] || actionLabel;
-  const needsProvisioning = newStatus === "Approved for Preview" || newStatus === "Approved";
+  const isRejection = newStatus === "Rejected";
+  const existingItem = AppState.allRequests?.find(r => r.id === itemId);
+  const existingComment = existingItem?.fields?.[CONFIG.COL_COMMENTS] || "";
+
+  openModal(html`
+    <div class="modal-header">
+      <span class="modal-title">${actionLabel}</span>
+      <button class="btn btn-ghost btn-icon btn-sm" onclick="closeModal()">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 1l12 12M13 1L1 13"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label for="admin-comment" style="font-weight:600;">
+          ${isRejection ? "Reason for rejection" : "Comment (optional)"}
+        </label>
+        <textarea id="admin-comment" class="textarea" style="min-height:100px;"
+          placeholder="${isRejection ? "Please explain why this form has been rejected…" : "Add a note for the form author…"}"
+        >${existingComment}</textarea>
+        ${safeHtml(isRejection ? `<span class="input-hint">This will be visible to the form author.</span>` : `<span class="input-hint">Optional — visible to the form author.</span>`)}
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn ${isRejection ? "btn-danger" : "btn-primary"}"
+        data-id="${itemId}" data-action="${actionLabel}"
+        onclick="confirmAdminAction(this)">
+        ${actionLabel}
+      </button>
+    </div>
+  `);
+}
+
+function confirmAdminAction(el) {
+  const id = el.dataset.id;
+  const action = el.dataset.action;
+  const comment = document.getElementById("admin-comment")?.value || "";
+  closeModal();
+  doAdminChangeStatus(id, action, comment);
+}
+
+async function doAdminChangeStatus(itemId, actionLabel, comment) {
+  const newStatus = CONFIG.STATUS_ACTION_MAP[actionLabel] || actionLabel;
+  const needsProvisioning = newStatus === "Preview" || newStatus === "Approved";
 
   if (needsProvisioning) showProgress("Processing", "Updating status…");
   try {
-    await updateListItem(CONFIG.FORMS_LIST, itemId, { [CONFIG.COL_STATUS]: newStatus });
+    await updateListItem(CONFIG.FORMS_LIST, itemId, {
+      [CONFIG.COL_STATUS]:   newStatus,
+      [CONFIG.COL_COMMENTS]: comment || "",
+    });
 
     if (needsProvisioning) {
       updateProgress("Provisioning SharePoint list…");
@@ -300,9 +522,26 @@ async function provisionDataList(itemId, newStatus) {
   const listName = def.listName;
   if (!listName) throw new Error("List name is missing from form definition");
 
+  const liveStatus = newStatus === "Approved" ? "Live" : "Preview";
   const siteId = await getSiteId();
 
-  // Delete existing data list if present (always recreate on approval)
+  if (liveStatus === "Live") {
+    updateProgress("Promoting to Live…");
+    await updateListItem(CONFIG.FORMS_LIST, itemId, { [CONFIG.COL_STATUS]: "Live" });
+    return;
+  }
+
+  // Fetch the Forms item to get the author's email from createdBy
+  let authorEmail = null;
+  try {
+    const listId = await getListId(CONFIG.FORMS_LIST);
+    const formsItem = await graphGet(`/sites/${siteId}/lists/${listId}/items/${itemId}?expand=createdBy`);
+    authorEmail = formsItem?.createdBy?.user?.email || null;
+  } catch (e) {
+    console.warn("Could not fetch author email:", e.message);
+  }
+
+  // Provisioning for Preview: delete any existing list and recreate fresh.
   try {
     const lists = await graphGet(`/sites/${siteId}/lists`);
     const existing = (lists.value || []).find(l => l.displayName === listName);
@@ -313,15 +552,14 @@ async function provisionDataList(itemId, newStatus) {
   } catch (_) {}
 
   // Create the data list and write resolved internalNames back into def
-  await doCreateSharePointList(listName, def, def.access || "StaffStudents");
+  await doCreateSharePointList(listName, def, def.access || "StaffStudents", authorEmail);
 
   // Persist the updated definition (with resolved internalNames) back to the Forms item
   updateProgress("Saving resolved column names…");
   await uploadJsonAttachment(CONFIG.FORMS_LIST, itemId, "form-definition.json", def);
 
-  // Set live status on the Forms item ("Preview" or "Live")
-  const liveStatus = newStatus === "Approved" ? "Live" : "Preview";
-  await updateListItem(CONFIG.FORMS_LIST, itemId, { [CONFIG.COL_STATUS]: liveStatus });
+  // Set status to Preview
+  await updateListItem(CONFIG.FORMS_LIST, itemId, { [CONFIG.COL_STATUS]: "Preview" });
 }
 
 // =============================================================
@@ -346,7 +584,7 @@ async function renderAdminLive(container) {
     const items = await getListItems(CONFIG.FORMS_LIST);
     const deployed = items.filter(i => {
       const s = i.fields?.[CONFIG.COL_STATUS] || "";
-      return s === "Preview" || s === "Live";
+      return (s === "Preview" || s === "Live") && !i.fields?.[CONFIG.COL_RETRO];
     });
     const card = document.getElementById("admin-live-table");
 
@@ -361,27 +599,27 @@ async function renderAdminLive(container) {
       catch (_) { return null; }
     }));
 
-    card.innerHTML = `
+    card.innerHTML = html`
       <div class="table-wrap">
         <table>
           <thead><tr><th>Form</th><th>List Name</th><th>Status</th><th>Access</th><th>Actions</th></tr></thead>
           <tbody>
-            ${deployed.map((item, idx) => {
+            ${safeHtml(deployed.map((item, idx) => {
               const f = item.fields || {};
               const def = defs[idx];
               const accessLabel = CONFIG.ACCESS_OPTIONS.find(a => a.value === def?.access)?.label || def?.access || "—";
-              return `<tr>
-                <td><strong>${escHtml(f.Title||"—")}</strong></td>
-                <td><span style="font-family:var(--mono);font-size:12px;color:var(--text2)">${escHtml(f[CONFIG.COL_LISTNAME]||"—")}</span></td>
-                <td>${statusBadge(f[CONFIG.COL_STATUS]||"—")}</td>
-                <td style="color:var(--text2);font-size:13px;">${escHtml(accessLabel)}</td>
+              return html`<tr>
+                <td><strong>${f.Title||"—"}</strong></td>
+                <td><span style="font-family:var(--mono);font-size:12px;color:var(--text2)">${f[CONFIG.COL_LISTNAME]||"—"}</span></td>
+                <td>${safeHtml(statusBadge(f[CONFIG.COL_STATUS]||"—"))}</td>
+                <td style="color:var(--text2);font-size:13px;">${accessLabel}</td>
                 <td>
-                  ${f[CONFIG.COL_STATUS] === "Preview" ? `
-                    <button class="btn btn-sm btn-primary" onclick="promoteToLive('${item.id}')">Promote to Live</button>
-                  ` : `<span style="font-size:12px;color:var(--text3);">Live</span>`}
+                  ${safeHtml(f[CONFIG.COL_STATUS] === "Preview" ? html`
+                    <button class="btn btn-sm btn-primary" data-id="${item.id}" onclick="promoteToLive(this.dataset.id)">Promote to Live</button>
+                  ` : `<span style="font-size:12px;color:var(--text3);">Live</span>`)}
                 </td>
               </tr>`;
-            }).join("")}
+            }).join(""))}
           </tbody>
         </table>
       </div>
@@ -417,7 +655,7 @@ async function forceRecreateList(existingListId, defJson, access) {
 // =============================================================
 // SP DATA LIST CREATION
 // =============================================================
-async function doCreateSharePointList(listName, def, access) {
+async function doCreateSharePointList(listName, def, access, authorEmail = null) {
   updateProgress(`Creating SharePoint list "${listName}"…`);
   const siteId = await getSiteId();
 
@@ -435,12 +673,14 @@ async function doCreateSharePointList(listName, def, access) {
   const nameClashes = [];
   for (const field of allFields) {
     if (field.type === "InfoText") continue;
-    const baseName = (field.label || "Field")
-      .replace(/[^a-zA-Z0-9_]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "") || "Field";
-    let uniqueName = baseName;
+    const baseName = sanitiseColumnName(field.label || "Field");
+    // SharePoint internal column names are capped at 32 characters
+    const baseNameTruncated = baseName.slice(0, 32);
+    let uniqueName = baseNameTruncated;
     let counter = 2;
     while (usedNames.has(uniqueName.toLowerCase())) {
-      uniqueName = `${baseName}_${counter++}`;
+      const suffix = `_${counter++}`;
+      uniqueName = baseNameTruncated.slice(0, 32 - suffix.length) + suffix;
     }
     if (uniqueName !== baseName) {
       nameClashes.push(`"${field.label}" → ${uniqueName}`);
@@ -449,24 +689,55 @@ async function doCreateSharePointList(listName, def, access) {
     field.internalName = uniqueName;
   }
 
-  // Second pass: create columns
+  // Second pass: create form definition columns — read back the SP-assigned internalName
   for (const field of allFields) {
     const colDef = buildColumnDefinition(field);
     if (!colDef) continue;
     try {
-      await graphPost(`/sites/${siteId}/lists/${newListId}/columns`, colDef);
+      const created = await graphPost(`/sites/${siteId}/lists/${newListId}/columns`, colDef);
+      // SharePoint may silently rename columns (e.g. "Field" → "field2" to avoid reserved name clashes).
+      // Always use the name SP actually assigned, not what we requested.
+      const spName = created?.name || created?.columnGroup || null;
+      if (spName && field.internalName !== spName) {
+        if (CONFIG.DEBUG_LOGGING) console.log(`[Columns] SP renamed "${field.internalName}" → "${spName}"`);
+        field.internalName = spName;
+      }
     } catch (e) {
       console.warn(`Column "${field.label}" failed:`, e.message);
     }
+  }
+
+  // Add IsDeleted Yes/No column for soft delete
+  try {
+    await graphPost(`/sites/${siteId}/lists/${newListId}/columns`, {
+      name: "IsDeleted",
+      displayName: "IsDeleted",
+      boolean: {},
+    });
+  } catch (e) {
+    console.warn("IsDeleted column failed:", e.message);
   }
 
   if (nameClashes.length) {
     console.info(`[Columns] ${nameClashes.length} field name(s) auto-renamed: ${nameClashes.join(", ")}`);
   }
 
+  // Set ReadSecurity=2 (users see own items only) and WriteSecurity=2 (users edit own items only)
+  // Form Managers get Contribute with override so they bypass this and see all items
+  try {
+    updateProgress("Configuring list security…");
+    await spMerge(`/_api/web/lists(guid'${newListId}')`, {
+      "__metadata": { "type": "SP.List" },
+      "ReadSecurity": 2,
+      "WriteSecurity": 2,
+    });
+  } catch (e) {
+    console.warn("List security settings failed:", e.message);
+  }
+
   try {
     updateProgress("Setting permissions…");
-    await setListPermissions(siteId, newListId, access, def.specificPeople || []);
+    await setListPermissions(siteId, newListId, access, def.specificPeople || [], def.formManagers || [], def.submissionType || "Submit", authorEmail);
   } catch (e) {
     console.warn("Permission assignment failed:", e.message);
     showToast("info", `List created but permissions could not be set: ${e.message}`);
@@ -475,22 +746,23 @@ async function doCreateSharePointList(listName, def, access) {
 
 function buildColumnDefinition(field) {
   const base = {
-    name: field.internalName || field.label.replace(/[^a-zA-Z0-9_]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "") || "Field",
+    name: sanitiseColumnName(field.internalName || field.label).slice(0, 32),
     displayName: field.label,
     required: !!field.required,
     description: field.description || "",
   };
   switch (field.type) {
-    case "InfoText":  return null;
-    case "Text":      return { ...base, text: {} };
+    case "InfoText":    return null;
+    case "FileUpload":  return null; // stored as native SP list item attachment
+    case "Text":        return { ...base, text: {} };
     case "Note":
-    case "RichText":  return { ...base, text: { allowMultipleLines: true, linesForEditing: 6 } };
-    case "Number":    return { ...base, number: {} };
-    case "Currency":  return { ...base, currency: {} };
-    case "DateTime":  return { ...base, dateTime: { displayAs: "default", format: "dateOnly" } };
-    case "Boolean":   return { ...base, boolean: {} };
-    case "URL":       return { ...base, hyperlinkOrPicture: { isPicture: false } };
-    case "User":      return { ...base, personOrGroup: { allowMultipleSelection: false } };
+    case "RichText":    return { ...base, text: { allowMultipleLines: true, linesForEditing: 6 } };
+    case "Number":      return { ...base, number: {} };
+    case "Currency":    return { ...base, currency: {} };
+    case "DateTime":    return { ...base, dateTime: { displayAs: "default", format: "dateOnly" } };
+    case "Boolean":     return { ...base, boolean: {} };
+    case "URL":         return { ...base, hyperlinkOrPicture: { isPicture: false } };
+    case "User":        return { ...base, personOrGroup: { allowMultipleSelection: true } };
     case "Choice":
     case "MultiChoice": return {
       ...base,
@@ -500,61 +772,133 @@ function buildColumnDefinition(field) {
         displayAs: field.type === "MultiChoice" ? "checkBoxes" : "dropDownMenu",
       }
     };
-    default: return { ...base, text: {} };
+    default:
+      console.warn(`[buildColumnDefinition] Unknown field type "${field.type}" — skipping column creation`);
+      return null;
   }
 }
 
 // =============================================================
 // LIST PERMISSIONS
 // =============================================================
-async function setListPermissions(siteId, graphListId, access, specificPeople = []) {
+async function ensureFormSubmitterRole() {
+  // Returns the Id of the "Form Submitter" role definition, creating it if needed.
+  // Permissions: ViewListItems (0x1) + AddListItems (0x2) = Low: 3, High: 0
+  const rolesData = await spGet(`/_api/web/roledefinitions`);
+  const roles = rolesData?.d?.results || [];
+  const existing = roles.find(r => r.Name === CONFIG.SUBMITTER_ROLE);
+  if (existing) return existing.Id;
+
+  // Create the custom role definition
+  const created = await spPost(`/_api/web/roledefinitions`, {
+    "__metadata": { "type": "SP.RoleDefinition" },
+    "Name": CONFIG.SUBMITTER_ROLE,
+    "Description": "Can add and view own items only. Used for form submissions.",
+    "BasePermissions": {
+      "__metadata": { "type": "SP.BasePermissions" },
+      "Low": "3",   // ViewListItems + AddListItems
+      "High": "0",
+    },
+  });
+  return created?.d?.Id;
+}
+
+async function ensureContributeRole(roles) {
+  return roles.find(r => r.Name === "Contribute") ||
+         roles.find(r => r.Name === "Edit") ||
+         roles.find(r => r.BasePermissions?.Low === "1011028719");
+}
+
+async function setListPermissions(siteId, graphListId, access, specificPeople = [], formManagers = [], submissionType = "Submit", authorEmail = null) {
   updateProgress("Configuring list permissions…");
   const listBase = `/_api/web/lists(guid'${graphListId}')`;
   await spPost(`${listBase}/breakroleinheritance(copyRoleAssignments=false,clearSubscopes=true)`);
 
+  // Get role definitions
   const rolesData = await spGet(`/_api/web/roledefinitions`);
   const roles = rolesData?.d?.results || [];
-  const contributeRole = roles.find(r => r.Name === "Contribute") ||
-                         roles.find(r => r.Name === "Edit") ||
-                         roles.find(r => r.BasePermissions?.Low === "1011028719");
-  if (!contributeRole) throw new Error("Could not find Contribute role definition on site");
-  const roleDefId = contributeRole.Id;
 
+  const contributeRole = await ensureContributeRole(roles);
+  if (!contributeRole) throw new Error("Could not find Contribute role definition on site");
+  const contributeId = contributeRole.Id;
+
+  // Ensure "Form Submitter" role exists (add-only, view own items — no edit)
+  updateProgress("Ensuring Form Submitter role…");
+  const submitterRoleId = await ensureFormSubmitterRole();
+
+  // SubmitEdit → Contribute (can add + edit own items — WriteSecurity=2 restricts to own)
+  // Submit only → Form Submitter (ViewListItems + AddListItems only — no edit)
+  // Note: if Graph returns 404 on submission, the Entra group grant likely failed —
+  // check the browser console for permission errors during provisioning.
+  const submitterRoleToApply = submissionType === "SubmitEdit" ? contributeId : submitterRoleId;
+
+  // ── Grant submitters the appropriate role ──────────────────
   if (access === "StaffStudents" || access === "StaffOnly") {
-    const groupNames = access === "StaffStudents"
-      ? [CONFIG.STAFF_GROUP, CONFIG.STUDENT_GROUP]
-      : [CONFIG.STAFF_GROUP];
-    for (const groupName of groupNames) {
-      updateProgress(`Granting access to ${groupName}…`);
-      try {
-        // Use ensureuser with the c:0t.c|tenant| claim + Entra Object ID to resolve
-        // M365/Entra groups — no directory read permissions required, avoids sitegroups
-        // API which only works for classic SharePoint groups.
-        const userData = await spPost(`/_api/web/ensureuser`, { logonName: `c:0t.c|tenant|${groupName}` });
-        const principalId = userData?.d?.Id;
-        if (!principalId) throw new Error(`ensureuser returned no ID`);
-        await spPost(`${listBase}/roleassignments/addroleassignment(principalid=${principalId},roledefid=${roleDefId})`);
-      } catch (e) {
-        console.warn(`Permission assignment failed for "${groupName}": ${e.message}`);
-        showToast("info", `Could not assign permissions to "${groupName}" — add manually in SharePoint`);
-      }
+    const groupGuid = access === "StaffStudents" ? CONFIG.STUDENT_GROUP : CONFIG.STAFF_GROUP;
+    const claimName = `c:0t.c|tenant|${groupGuid}`;
+    updateProgress(`Granting submit access to group ${groupGuid}…`);
+    try {
+      const userData = await spPost(`/_api/web/ensureuser`, { logonName: claimName });
+      const spPrincipalId = userData?.d?.Id;
+      if (CONFIG.DEBUG_LOGGING) console.log("[Permissions] Submitter group principal ID:", spPrincipalId, "role:", submitterRoleToApply);
+      if (!spPrincipalId) throw new Error(`ensureUser returned no ID for group ${groupGuid}`);
+      await spPost(`${listBase}/roleassignments/addroleassignment(principalid=${spPrincipalId},roledefid=${submitterRoleToApply})`);
+      if (CONFIG.DEBUG_LOGGING) console.log("[Permissions] Submitter group grant succeeded");
+    } catch (e) {
+      console.error("[Permissions] Submitter group grant failed:", e.message);
+      throw new Error(`Could not resolve Entra group "${groupGuid}": ${e.message}`);
     }
   } else if (access === "Specific") {
-    if (!specificPeople.length) return;
     for (const person of specificPeople) {
-      updateProgress(`Granting access to ${person.displayName}…`);
+      updateProgress(`Granting submit access to ${person.displayName}…`);
       try {
         const userEmail = person.email || person.mail || "";
         if (!userEmail) continue;
         const userData = await spPost(`/_api/web/ensureuser`, { logonName: `i:0#.f|membership|${userEmail}` });
         const spUserId = userData?.d?.Id;
-        if (!spUserId) throw new Error(`ensureUser returned no ID for ${userEmail}`);
-        await spPost(`${listBase}/roleassignments/addroleassignment(principalid=${spUserId},roledefid=${roleDefId})`);
+        if (!spUserId) continue;
+        await spPost(`${listBase}/roleassignments/addroleassignment(principalid=${spUserId},roledefid=${submitterRoleToApply})`);
+        if (CONFIG.DEBUG_LOGGING) console.log("[Permissions] Specific person grant succeeded:", userEmail);
       } catch (e) {
-        console.warn(`Could not grant access to ${person.displayName}: ${e.message}`);
-        showToast("info", `Could not grant access to ${person.displayName} — add manually`);
+        console.error(`[Permissions] Submit access failed for ${person.displayName}:`, e.message);
       }
     }
   }
+
+  // ── Grant author Contribute ──────────────────────────────
+  if (authorEmail) {
+    updateProgress("Granting author full access…");
+    try {
+      const userData = await spPost(`/_api/web/ensureuser`, { logonName: `i:0#.f|membership|${authorEmail}` });
+      const spUserId = userData?.d?.Id;
+      if (CONFIG.DEBUG_LOGGING) console.log("[Permissions] Author principal ID:", spUserId, "email:", authorEmail);
+      if (spUserId) {
+        await spPost(`${listBase}/roleassignments/addroleassignment(principalid=${spUserId},roledefid=${contributeId})`);
+        if (CONFIG.DEBUG_LOGGING) console.log("[Permissions] Author grant succeeded");
+      }
+    } catch (e) {
+      console.error("[Permissions] Author access failed:", e.message);
+    }
+  } else {
+    console.warn("[Permissions] No author email available — author will not have list access");
+  }
+
+  // ── Grant Form Managers Contribute ──────────────────────
+  for (const manager of formManagers) {
+    updateProgress(`Granting manager access to ${manager.displayName}…`);
+    try {
+      const userEmail = manager.email || manager.mail || "";
+      if (!userEmail) continue;
+      const userData = await spPost(`/_api/web/ensureuser`, { logonName: `i:0#.f|membership|${userEmail}` });
+      const spUserId = userData?.d?.Id;
+      if (!spUserId) continue;
+      await spPost(`${listBase}/roleassignments/addroleassignment(principalid=${spUserId},roledefid=${contributeId})`);
+      if (CONFIG.DEBUG_LOGGING) console.log("[Permissions] Manager grant succeeded:", userEmail);
+    } catch (e) {
+      console.error(`[Permissions] Manager access failed for ${manager.displayName}:`, e.message);
+      showToast("info", `Could not grant manager access to ${manager.displayName} — add manually`);
+    }
+  }
+
   updateProgress("Permissions set successfully");
 }
