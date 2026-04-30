@@ -618,29 +618,39 @@ function renderConditionRule(c, ci, allFields) {
   }
 
   const op = c.operator || "eq";
-  const operatorSelect = html`<select class="select" style="min-width:110px;" data-ci="${ci}" onchange="AppState.builderForm.conditions[+this.dataset.ci].operator=this.value;renderStepConditions(document.getElementById('wizard-step-content'))">
-    ${operators.map(o => html`<option value="${o.value}" ${op === o.value ? "selected" : ""}>${o.label}</option>`).join("")}
-  </select>`;
+
+  // FIX: build operatorSelect and valueInput as plain string concatenation, not with the
+  // html`` tag. The html`` tag auto-escapes all interpolated values, so using it here
+  // caused the inner .map().join("") result (a string of <option> tags) to be HTML-escaped
+  // a second time — turning <option> into &lt;option&gt; and leaving the select blank.
+  // Plain string concatenation with explicit escAttr/escHtml calls is correct here;
+  // safeHtml() in the outer html`` template (lines below) then passes them through unmodified.
+  const operatorSelect =
+    `<select class="select" style="min-width:110px;" data-ci="${ci}" onchange="AppState.builderForm.conditions[+this.dataset.ci].operator=this.value;renderStepConditions(document.getElementById('wizard-step-content'))">` +
+    operators.map(o => `<option value="${escAttr(o.value)}"${op === o.value ? " selected" : ""}>${escHtml(o.label)}</option>`).join("") +
+    `</select>`;
 
   // Value input — smart based on trigger field type
   let valueInput = "";
   if (boolTypes.includes(triggerType)) {
     const bVal = c.equalsValue === "true" || c.equalsValue === true;
-    valueInput = html`<select class="select" data-ci="${ci}" onchange="AppState.builderForm.conditions[+this.dataset.ci].equalsValue=this.value">
-      <option value="true"  ${bVal        ? "selected" : ""}>Yes</option>
-      <option value="false" ${!bVal       ? "selected" : ""}>No</option>
-    </select>`;
+    valueInput =
+      `<select class="select" data-ci="${ci}" onchange="AppState.builderForm.conditions[+this.dataset.ci].equalsValue=this.value">` +
+      `<option value="true"${bVal ? " selected" : ""}>Yes</option>` +
+      `<option value="false"${!bVal ? " selected" : ""}>No</option>` +
+      `</select>`;
   } else if (choiceTypes.includes(triggerType) && triggerField?.choices?.length) {
-    valueInput = html`<select class="select" data-ci="${ci}" onchange="AppState.builderForm.conditions[+this.dataset.ci].equalsValue=this.value">
-      <option value="">— choose —</option>
-      ${triggerField.choices.map(ch => html`<option value="${ch}" ${c.equalsValue === ch ? "selected" : ""}>${ch}</option>`).join("")}
-    </select>`;
+    valueInput =
+      `<select class="select" data-ci="${ci}" onchange="AppState.builderForm.conditions[+this.dataset.ci].equalsValue=this.value">` +
+      `<option value="">— choose —</option>` +
+      triggerField.choices.map(ch => `<option value="${escAttr(ch)}"${c.equalsValue === ch ? " selected" : ""}>${escHtml(ch)}</option>`).join("") +
+      `</select>`;
   } else if (numericTypes.includes(triggerType)) {
-    valueInput = html`<input class="input" type="number" step="any" placeholder="0" style="max-width:120px;" value="${c.equalsValue||""}" data-ci="${ci}" oninput="AppState.builderForm.conditions[+this.dataset.ci].equalsValue=this.value">`;
+    valueInput = `<input class="input" type="number" step="any" placeholder="0" style="max-width:120px;" value="${escAttr(c.equalsValue||"")}" data-ci="${ci}" oninput="AppState.builderForm.conditions[+this.dataset.ci].equalsValue=this.value">`;
   } else if (dateTypes.includes(triggerType)) {
-    valueInput = html`<input class="input" type="date" style="max-width:160px;" value="${c.equalsValue||""}" data-ci="${ci}" oninput="AppState.builderForm.conditions[+this.dataset.ci].equalsValue=this.value">`;
+    valueInput = `<input class="input" type="date" style="max-width:160px;" value="${escAttr(c.equalsValue||"")}" data-ci="${ci}" oninput="AppState.builderForm.conditions[+this.dataset.ci].equalsValue=this.value">`;
   } else {
-    valueInput = html`<input class="input" placeholder="value" value="${c.equalsValue||""}" data-ci="${ci}" oninput="AppState.builderForm.conditions[+this.dataset.ci].equalsValue=this.value">`;
+    valueInput = `<input class="input" placeholder="value" value="${escAttr(c.equalsValue||"")}" data-ci="${ci}" oninput="AppState.builderForm.conditions[+this.dataset.ci].equalsValue=this.value">`;
   }
 
   return html`
