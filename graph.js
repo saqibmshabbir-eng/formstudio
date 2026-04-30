@@ -74,6 +74,21 @@ async function graphDelete(path) {
   return {};
 }
 
+async function graphPut(path, body) {
+  const token = await getWriteToken();
+  const res = await fetch(CONFIG.GRAPH_BASE + path, {
+    method: "PUT",
+    headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `Graph error ${res.status}`);
+  }
+  if (res.status === 204) return {};
+  return res.json();
+}
+
 // Get SharePoint site ID
 let _siteId = null;
 async function getSiteId() {

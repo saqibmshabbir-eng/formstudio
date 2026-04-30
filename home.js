@@ -34,61 +34,21 @@ async function loadHomeForms() {
     const items = await getListItems(CONFIG.FORMS_LIST);
     const { isAdmin, currentUser } = AppState;
 
-    // Determine whether the current user is a student based on email domain.
-    // Students: @student.le.ac.uk or @student.leicester.ac.uk
-    // Staff:    @leicester.ac.uk without the "student" subdomain
-    const currentEmail = (currentUser?.email || "").toLowerCase();
-    const isStudent = currentEmail.includes("@student.le.ac.uk") ||
-                      currentEmail.includes("@student.leicester.ac.uk");
-
-    // Load definitions for all Live non-retro items in parallel to check access field.
-    const liveNonRetro = items.filter(i =>
-      (i.fields?.[CONFIG.COL_STATUS] || i.fields?.Status) === "Live" &&
-      !i.fields?.[CONFIG.COL_RETRO]
-    );
-    const defResults = await Promise.allSettled(
-      liveNonRetro.map(i => getFormDefinition(CONFIG.FORMS_LIST, i.id))
-    );
-    const defMap = new Map(
-      liveNonRetro.map((i, idx) => [
-        i.id,
-        defResults[idx].status === "fulfilled" ? defResults[idx].value : null,
-      ])
-    );
-
     // Determine Preview visibility — use SP createdBy (authoritative) rather than JSON
     // getListItems already expands createdBy so it's available on each item
     const visible = items.filter(i => {
       const f = i.fields || {};
       const s = f[CONFIG.COL_STATUS] || f.Status;
-
-      // Retro forms — always show if they have a ListLocation (no access check needed)
+      // Retro forms — always show if they have a ListLocation
       if (f[CONFIG.COL_RETRO]) return !!f[CONFIG.COL_LIST_LOCATION];
-
+      if (s === "Live") return true;
       if (s === "Preview") {
         if (isAdmin) return true;
         const createdByEmail = (i.createdBy?.user?.email || "").toLowerCase();
         return createdByEmail && currentUser?.email &&
                createdByEmail === currentUser.email.toLowerCase();
       }
-
-      if (s !== "Live") return false;
-
-      // Admins always see all Live forms
-      if (isAdmin) return true;
-
-      // Apply access filter for Live non-retro forms
-      const def = defMap.get(i.id);
-      const access = def?.access || "StaffStudents";
-
-      if (access === "StaffStudents") return true;
-      if (access === "StaffOnly") return !isStudent;
-      if (access === "Specific") {
-        const people = def?.specificPeople || [];
-        return people.some(p => (p.email || "").toLowerCase() === currentEmail);
-      }
-
-      return true; // unknown access value — fail open
+      return false;
     });
 
     if (!visible.length) {
@@ -153,55 +113,18 @@ function renderFormRow(item) {
 
 async function showFormsModal() {
   const currentEmail = (AppState.currentUser?.email || "").toLowerCase();
-  const isStudent = currentEmail.includes("@student.le.ac.uk") ||
-                    currentEmail.includes("@student.leicester.ac.uk");
-
   const items = await getListItems(CONFIG.FORMS_LIST);
-
-  // Load definitions for Live non-retro forms to apply access filter
-  const liveNonRetro = items.filter(i =>
-    (i.fields?.[CONFIG.COL_STATUS] || i.fields?.Status) === "Live" &&
-    !i.fields?.[CONFIG.COL_RETRO]
-  );
-  const defResults = await Promise.allSettled(
-    liveNonRetro.map(i => getFormDefinition(CONFIG.FORMS_LIST, i.id))
-  );
-  const defMap = new Map(
-    liveNonRetro.map((i, idx) => [
-      i.id,
-      defResults[idx].status === "fulfilled" ? defResults[idx].value : null,
-    ])
-  );
-
   const forms = items.filter(i => {
     const f = i.fields || {};
     const s = f[CONFIG.COL_STATUS] || f.Status;
-
-    // Retro forms — show if they have a ListLocation
     if (f[CONFIG.COL_RETRO]) return !!f[CONFIG.COL_LIST_LOCATION];
-
+    if (s === "Live") return true;
     if (s === "Preview") {
       if (AppState.isAdmin) return true;
       return (i.createdBy?.user?.email || "").toLowerCase() === currentEmail;
     }
-
-    if (s !== "Live") return false;
-
-    if (AppState.isAdmin) return true;
-
-    const def = defMap.get(i.id);
-    const access = def?.access || "StaffStudents";
-
-    if (access === "StaffStudents") return true;
-    if (access === "StaffOnly") return !isStudent;
-    if (access === "Specific") {
-      const people = def?.specificPeople || [];
-      return people.some(p => (p.email || "").toLowerCase() === currentEmail);
-    }
-
-    return true;
+    return false;
   });
-
   openModal(html`
     <div class="modal-header">
       <span class="modal-title">Available Forms</span>
@@ -245,3 +168,4 @@ function filterFormsModal(query) {
     el.style.display = !q || el.dataset.title.includes(q) ? "" : "none";
   });
 }
+

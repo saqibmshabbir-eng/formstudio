@@ -1,6 +1,79 @@
 // Form Studio — Utilities, Boot & Theme
 
 // =============================================================
+// ADMIN LIVE MANAGEMENT
+// =============================================================
+async function renderAdminLive(container) {
+  if (!AppState.isAdmin) {
+    container.innerHTML = `<div class="empty-state"><h3>Access Denied</h3></div>`;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="flex items-center justify-between mb-4">
+      <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;">Live Form Management</h1>
+    </div>
+    <div class="card" id="admin-live-table">
+      <div style="padding:40px;text-align:center;"><span class="spinner"></span></div>
+    </div>
+  `;
+
+  try {
+    const items = await getListItems(CONFIG.FORMS_LIST);
+    const card = document.getElementById("admin-live-table");
+    if (!items.length) {
+      card.innerHTML = `<div class="empty-state"><h3>No live forms yet</h3></div>`;
+      return;
+    }
+
+    // Load JSON definitions in parallel to get access values (not a SP column)
+    const defs = await Promise.all(items.map(async item => {
+      try { return await getFormDefinition(CONFIG.FORMS_LIST, item.id); }
+      catch (_) { return null; }
+    }));
+
+    card.innerHTML = html`
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Form</th><th>List Name</th><th>Status</th><th>Access</th><th>Actions</th></tr></thead>
+          <tbody>
+            ${safeHtml(items.map((item, idx) => {
+              const f = item.fields || {};
+              const def = defs[idx];
+              const accessVal = def?.access || "";
+              const accessLabel = CONFIG.ACCESS_OPTIONS.find(a => a.value === accessVal)?.label || accessVal || "—";
+              return html`<tr>
+                <td><strong>${f.Title||"—"}</strong></td>
+                <td><span style="font-family:var(--mono);font-size:12px;color:var(--text2)">${f.ListName||"—"}</span></td>
+                <td>${safeHtml(statusBadge(f.Status||"—"))}</td>
+                <td style="color:var(--text2);font-size:13px;">${accessLabel}</td>
+                <td>
+                  ${safeHtml(f.Status === "Preview" ? html`
+                    <button class="btn btn-sm btn-primary" data-id="${item.id}" onclick="promoteToLive(this.dataset.id)">Promote to Live</button>
+                  ` : `<span style="font-size:12px;color:var(--text3);">Live</span>`)}
+                </td>
+              </tr>`;
+            }).join(""))}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch (e) {
+    document.getElementById("admin-live-table").innerHTML =
+      `<div class="empty-state"><p style="color:var(--red)">Error: ${escHtml(e.message)}</p></div>`;
+  }
+}
+
+async function promoteToLive(liveFormItemId) {
+  try {
+    await updateListItem(CONFIG.FORMS_LIST, liveFormItemId, { [CONFIG.COL_STATUS]: "Live" });
+    showToast("success", "Form promoted to Live");
+    renderAdminLive(document.getElementById("main-content"));
+  } catch (e) {
+    showToast("error", "Failed: " + e.message);
+  }
+}
+// =============================================================
 // USER MENU
 // =============================================================
 function showUserMenu() {
@@ -121,13 +194,15 @@ async function bootApp() {
     } catch (_) {}
 
     // Check permissions in parallel
-    const [adminStatus, formReadAccess] = await Promise.all([
+    const [adminStatus, formReadAccess, formWriteAccess] = await Promise.all([
       checkIsAdmin(AppState.currentUser.displayName, AppState.currentUser.email),
       checkListReadAccess(CONFIG.FORMS_LIST),
+      checkListWriteAccess(CONFIG.FORMS_LIST),
     ]);
 
     AppState.isAdmin = adminStatus;
     AppState.hasFormRequestAccess = formReadAccess;
+    AppState.canCreateForms = formWriteAccess;
 
     // Set initial view
     AppState.currentView = "home";
