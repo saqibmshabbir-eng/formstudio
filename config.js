@@ -22,28 +22,21 @@ const CONFIG = {
   // Find these in Entra admin centre → Groups → <group> → Overview → Object ID.
   // The c:0t.c|tenant| claim format resolves an Entra group by Object ID via
   // SharePoint's ensureuser endpoint — no directory read permissions required.
-  STAFF_GROUP:   "d4b4a155-7c91-4b84-95b9-8b951a695c00", // Entra Object ID for FLM-SPO-Staff-Intranet-Visitors
-  STUDENT_GROUP: "01e83af2-cf5c-4788-a433-b930b85d2fb3", // Entra Object ID for FLM-SPO-Student-Intranet-Visitors
+  STAFF_GROUP:   "00000000-0000-0000-0000-000000000000", // TODO: replace with Entra Object ID for FLM-SPO-Staff-Intranet-Visitors
+  STUDENT_GROUP: "00000000-0000-0000-0000-000000000000", // TODO: replace with Entra Object ID for FLM-SPO-Student-Intranet-Visitors
 
   // Column value used to identify admins in FormAdmins list
   ADMIN_TITLE_VALUE: "Admin",
 
   // ── SharePoint internal column names on the Forms list ───────────────────
-  COL_STATUS:        "Status",         // Single line text
-  COL_LISTNAME:      "ListName",       // Single line text — name of the provisioned data list
-  COL_FORM_DEF:      "FormDefinition", // Multiline plain text — the JSON blob
-  COL_COMMENTS:      "AdminComments",  // Multiline plain text — admin approval/rejection notes
-  COL_IS_DELETED:    "IsDeleted",      // Yes/No — soft delete flag on data lists
-  COL_RETRO:         "Retro",          // Yes/No — marks an externally-owned SP list form
-  COL_LIST_LOCATION: "ListLocation",   // Single line text — SP new item URL for retro forms
-  COL_VIEW_URL:      "ViewUrl",        // Single line text — URL to view submissions for retro forms
-  SUBMITTER_ROLE: "Form Submitter", // Custom SP role: AddListItems + ViewListItems (own items only)
+  COL_STATUS:   "Status",         // Single line text
+  COL_LISTNAME: "ListName",       // Single line text — name of the provisioned data list
+  COL_FORM_DEF: "FormDefinition", // Multiline plain text — the JSON blob
 
   // Microsoft Graph API base URL
   GRAPH_BASE: "https://graph.microsoft.com/v1.0",
 
-  // Set to true to enable verbose Graph API error logging in the browser console
-  DEBUG_LOGGING: true,
+  // MSAL scopes required
   SCOPES: [
     "Sites.ReadWrite.All",
     "Sites.Manage.All",
@@ -53,22 +46,22 @@ const CONFIG = {
   ],
 
   // Supported field types for the form builder
-  // Note: Lookup (requires target list), Thumbnail/Image (Graph API limitation),
-  // and Calculated (requires formula) are intentionally excluded — they cannot
-  // be created programmatically via the Graph API column endpoint.
   FIELD_TYPES: [
     { value: "Text",        label: "Single Line Text" },
     { value: "Note",        label: "Multiline Text" },
     { value: "RichText",    label: "Rich Text" },
     { value: "Number",      label: "Number" },
     { value: "Currency",    label: "Currency" },
-    { value: "DateTime",    label: "Date" },
+    { value: "DateTime",    label: "Date / Time" },
     { value: "Boolean",     label: "Yes / No" },
     { value: "Choice",      label: "Choice (Dropdown)" },
     { value: "MultiChoice", label: "Multiple Choice (Checkboxes)" },
     { value: "User",        label: "Person or Group" },
+    { value: "Lookup",      label: "Lookup" },
     { value: "URL",         label: "Hyperlink" },
-    { value: "FileUpload",  label: "File Upload" },
+    { value: "Location",    label: "Location" },
+    { value: "Thumbnail",   label: "Image" },
+    { value: "Calculated",  label: "Calculated" },
     { value: "InfoText",    label: "Info / Notice (display only)" },
   ],
 
@@ -85,8 +78,9 @@ const CONFIG = {
 
   // Full lifecycle status flow — single list, single flow
   STATUS_FLOW: {
-    "Created":            [],
-    "Submitted":          ["Approve for Preview", "Reject"],
+    "Draft":              [],
+    "Submitted":          ["Approve for Review", "Reject"],
+    "Approved for Preview": ["Approve", "Reject"],
     "Preview":            ["Approve", "Reject"],
     "Approved":           [],
     "Live":               [],
@@ -94,8 +88,8 @@ const CONFIG = {
   },
 
   STATUS_ACTION_MAP: {
-    "Approve for Preview": "Preview",
-    "Approve":             "Approved",
-    "Reject":              "Rejected",
+    "Approve for Review": "Approved for Preview",
+    "Approve":              "Approved",
+    "Reject":               "Rejected",
   },
 };

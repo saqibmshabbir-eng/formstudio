@@ -136,12 +136,6 @@ async function renderAdminReview(container) {
                       </button>
                     `).join(""))}
                     ${safeHtml(showLocked ? `<span style="font-size:12px;color:var(--text3);">Locked</span>` : "")}
-                    ${safeHtml((isPreview || status === "Live") && isAdmin ? html`
-                      <button class="btn btn-sm btn-ghost" data-id="${item.id}" title="Sync column names from SharePoint to fix submission errors"
-                        onclick="repairColumnNames(this.dataset.id)" style="color:var(--amber,#d97706);">
-                        ⚙ Repair
-                      </button>
-                    ` : "")}
                   </div>
                 </td>
               </tr>`;
@@ -152,64 +146,6 @@ async function renderAdminReview(container) {
     `;
   } catch (e) {
     document.getElementById("admin-table").innerHTML = html`<div class="empty-state"><p style="color:var(--red)">Error: ${e.message}</p></div>`;
-  }
-}
-
-// =============================================================
-// REPAIR COLUMN NAMES
-// Reads the actual SP list columns and patches internalName in the
-// JSON definition to match — fixes forms provisioned before the
-// "read-back SP name" fix was in place.
-// =============================================================
-async function repairColumnNames(itemId) {
-  showProgress("Repairing", "Reading form definition…");
-  try {
-    const def = await getFormDefinition(CONFIG.FORMS_LIST, itemId);
-    if (!def) throw new Error("Form definition not found");
-
-    const listName = def.listName;
-    if (!listName) throw new Error("No list name in form definition");
-
-    updateProgress("Reading SharePoint columns…");
-    const siteId = await getSiteId();
-    const listId = await getListId(listName);
-
-    // Fetch all columns from the SP list
-    const colsResp = await graphGet(`/sites/${siteId}/lists/${listId}/columns`);
-    const spColumns = colsResp.value || [];
-
-    // Build a lookup: displayName (lowercase) → actual internalName
-    const displayToInternal = {};
-    for (const col of spColumns) {
-      if (col.displayName && col.name) {
-        displayToInternal[col.displayName.toLowerCase()] = col.name;
-      }
-    }
-
-    // Patch each field's internalName using the SP column's actual name
-    let patchCount = 0;
-    const allFields = (def.sections || []).flatMap(s => s.fields || []);
-    for (const field of allFields) {
-      if (field.type === "InfoText" || field.type === "FileUpload") continue;
-      const spName = displayToInternal[field.label.toLowerCase()];
-      if (spName && spName !== field.internalName) {
-        console.log(`[Repair] "${field.label}": "${field.internalName}" → "${spName}"`);
-        field.internalName = spName;
-        patchCount++;
-      } else if (!field.internalName && spName) {
-        field.internalName = spName;
-        patchCount++;
-      }
-    }
-
-    updateProgress("Saving repaired definition…");
-    await uploadJsonAttachment(CONFIG.FORMS_LIST, itemId, "form-definition.json", def);
-
-    hideProgress();
-    showToast("success", `Column names repaired — ${patchCount} field${patchCount !== 1 ? "s" : ""} updated.`);
-  } catch (e) {
-    hideProgress();
-    showToast("error", "Repair failed: " + e.message);
   }
 }
 
@@ -640,17 +576,6 @@ async function promoteToLive(itemId) {
   }
 }
 
-async function forceRecreateList(existingListId, defJson, access) {
-  try {
-    const siteId = await getSiteId();
-    await graphDelete(`/sites/${siteId}/lists/${existingListId}`);
-    const def = JSON.parse(defJson);
-    await doCreateSharePointList(def.listName, def, def.access || access);
-    showToast("success", "List recreated successfully");
-  } catch (e) {
-    showToast("error", "Recreation failed: " + e.message);
-  }
-}
 
 // =============================================================
 // SP DATA LIST CREATION

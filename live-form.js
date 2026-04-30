@@ -72,6 +72,7 @@ async function renderLiveForms(container) {
 
     const visible = items.filter(canSeeForm);
 
+
     if (!visible.length) {
       grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1;"><h3>No forms available</h3><p>Check back later.</p></div>`;
       return;
@@ -629,15 +630,6 @@ function refreshPersonChips(fieldId) {
       </button>
     </span>`;
   }).join("");
-}
-
-function clearPersonField(fieldId) {
-  if (window._liveFormState) {
-    window._liveFormState.formValues[fieldId] = [];
-  }
-  refreshPersonChips(fieldId);
-  const searchEl = document.getElementById(`person-search-${fieldId}`);
-  if (searchEl) searchEl.value = "";
 }
 
 

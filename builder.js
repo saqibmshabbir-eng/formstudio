@@ -3,91 +3,6 @@
 // =============================================================
 // MY REQUESTS VIEW (kept for internal use)
 // =============================================================
-async function renderMyRequests(container) {
-  container.innerHTML = html`
-    <div class="flex items-center justify-between mb-4">
-      <div>
-        <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;">My Form Requests</h1>
-        <p style="color:var(--text2);font-size:13.5px;margin-top:2px;">Track and manage your form definition submissions</p>
-      </div>
-      <button class="btn btn-primary" onclick="startNewForm(document.getElementById('main-content'))">
-        ${safeHtml(newFormIcon())} New Request
-      </button>
-    </div>
-    <div class="card" id="requests-table-card">
-      <div style="padding:40px;text-align:center;"><span class="spinner"></span></div>
-    </div>
-  `;
-
-  if (!AppState.hasFormRequestAccess) {
-    container.innerHTML = `
-      <div class="empty-state">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-        <h3>Access Restricted</h3>
-        <p>You don't have permission to access the Form Request list.</p>
-      </div>
-    `;
-    return;
-  }
-
-  try {
-    const userFilter = `fields/Author/EMail eq '${AppState.currentUser.email}'`;
-    const items = await getListItems(CONFIG.FORMS_LIST);
-    AppState.myRequests = items.filter(i =>
-      i.fields?.AuthorLookupId || true // All user's own items come back naturally
-    );
-
-    const card = document.getElementById("requests-table-card");
-    if (!AppState.myRequests.length) {
-      card.innerHTML = html`<div class="empty-state">
-        ${safeHtml(formRequestsIcon())}
-        <h3 style="margin-top:12px;">No form requests yet</h3>
-        <p>Create your first form request to get started.</p>
-        <button class="btn btn-primary mt-4" onclick="startNewForm(document.getElementById('main-content'))">Create Form Request</button>
-      </div>`;
-      return;
-    }
-
-    card.innerHTML = html`
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Form Name</th>
-              <th>Type</th>
-              <th>Status</th>
-              <th>Modified</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            ${safeHtml(AppState.myRequests.map(item => {
-              const f = item.fields || {};
-              const locked = ["Live","Approved","Rejected","Submitted"].includes(f.Status);
-              const isCreated = f.Status === "Created";
-              return html`<tr>
-                <td><strong>${f.Title || "—"}</strong></td>
-                <td>${safeHtml(f.Type ? html`<span class="badge badge-blue">${f.Type}</span>` : "—")}</td>
-                <td>${safeHtml(statusBadge(f.Status || "Created"))}</td>
-                <td style="color:var(--text2);font-size:12.5px;">${formatDate(f.Modified)}</td>
-                <td>
-                  <div class="flex gap-2">
-                    <button class="btn btn-ghost btn-sm" data-id="${item.id}" onclick="previewRequest(this.dataset.id)">Preview</button>
-                    ${safeHtml(!locked ? html`<button class="btn btn-secondary btn-sm" data-id="${item.id}" onclick="editRequest(this.dataset.id)">Edit</button>` : "")}
-                    ${safeHtml(isCreated ? html`<button class="btn btn-primary btn-sm" data-id="${item.id}" onclick="submitRequest(this.dataset.id)">Submit</button>` : "")}
-                  </div>
-                </td>
-              </tr>`;
-            }).join(""))}
-          </tbody>
-        </table>
-      </div>
-    `;
-  } catch (e) {
-    document.getElementById("requests-table-card").innerHTML = html`
-      <div class="empty-state"><p style="color:var(--red)">Error loading requests: ${e.message}</p></div>`;
-  }
-}
 // =============================================================
 // FORM BUILDER — WIZARD
 // =============================================================
@@ -486,7 +401,6 @@ function openFieldModal(field, si, fi) {
   `, true);
 }
 
-function syncFieldInternalName() {} // no-op — internal names generated at SP column creation time
 
 function toggleFieldOptions(type) {
   const isInfoText   = type === "InfoText";
@@ -503,7 +417,6 @@ function toggleFieldOptions(type) {
 }
 
 // Keep legacy name as alias in case anything still calls it
-function toggleChoiceOptions(type) { toggleFieldOptions(type); }
 
 function saveField(si, fi, isEdit) {
   const type = document.getElementById("field-type")?.value;
@@ -617,6 +530,7 @@ function renderConditionRule(c, ci, allFields) {
     ];
   }
 
+
   const op = c.operator || "eq";
 
   // FIX: build operatorSelect and valueInput as plain string concatenation, not with the
@@ -652,6 +566,7 @@ function renderConditionRule(c, ci, allFields) {
   } else {
     valueInput = `<input class="input" placeholder="value" value="${escAttr(c.equalsValue||"")}" data-ci="${ci}" oninput="AppState.builderForm.conditions[+this.dataset.ci].equalsValue=this.value">`;
   }
+
 
   return html`
     <div class="condition-rule" style="flex-wrap:wrap;gap:8px;">

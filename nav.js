@@ -72,18 +72,16 @@ function navigateTo(view) {
     "my-forms":       "My Forms",
     "admin-review":   "Form Requests",
     "new-form":       "Form Builder",
-    "my-requests":    "Home",
   };
 
   switch (view) {
-    case "home":          renderHome(main); break;
-    case "live-forms":    renderLiveForms(main); break;
-    case "my-submissions":renderMySubmissions(main); break;
-    case "my-forms":      renderMyForms(main); break;
-    case "admin-review":  renderAdminReview(main); break;
-    case "new-form":      startNewForm(main); break;
-    case "my-requests":   renderHome(main); break;
-    default:              renderHome(main);
+    case "home":           renderHome(main); break;
+    case "live-forms":     renderLiveForms(main); break;
+    case "my-submissions": renderMySubmissions(main); break;
+    case "my-forms":       renderMyForms(main); break;
+    case "admin-review":   renderAdminReview(main); break;
+    case "new-form":       startNewForm(main); break;
+    default:               renderHome(main);
   }
 
   // Update / create mobile bottom nav
