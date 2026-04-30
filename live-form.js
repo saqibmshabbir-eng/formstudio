@@ -21,15 +21,61 @@ async function renderLiveForms(container) {
     const grid = document.getElementById("live-forms-grid");
     AppState.liveForms = items;
 
-    // Filter by status — admins see Live + Preview, authors see Live + their own Preview
+    // Determine whether the current user is a student based on email domain.
+    // Students: @student.le.ac.uk or @student.leicester.ac.uk
+    // Staff:    @leicester.ac.uk without the "student" subdomain
     const currentEmail = (AppState.currentUser?.email || "").toLowerCase();
-    const visible = items.filter(i => {
-      const s = i.fields?.Status;
-      const isOwn = (i.createdBy?.user?.email || "").toLowerCase() === currentEmail;
-      if (s === "Live") return true;
+    const isStudent = currentEmail.includes("@student.le.ac.uk") ||
+                      currentEmail.includes("@student.leicester.ac.uk");
+
+    // Load definitions for all Live non-retro items in parallel so we can check the access field.
+    // Retro forms have no JSON definition and are only shown on the home page, not here.
+    // Preview items don't need this — they are already restricted to admin/author only.
+    const liveItems = items.filter(i => i.fields?.Status === "Live" && !i.fields?.[CONFIG.COL_RETRO]);
+    const defResults = await Promise.allSettled(
+      liveItems.map(i => getFormDefinition(CONFIG.FORMS_LIST, i.id))
+    );
+    // Build a Map of itemId → definition for O(1) lookup in the filter below.
+    const defMap = new Map(
+      liveItems.map((i, idx) => [
+        i.id,
+        defResults[idx].status === "fulfilled" ? defResults[idx].value : null,
+      ])
+    );
+
+    // Returns true if the current user is allowed to see this form card.
+    function canSeeForm(item) {
+      const s = item.fields?.Status;
+      const isOwn = (item.createdBy?.user?.email || "").toLowerCase() === currentEmail;
+
+      // Retro forms are only shown on the home page — exclude them from this grid.
+      if (item.fields?.[CONFIG.COL_RETRO]) return false;
+
+      // Preview: only admins and the form's own author see it.
       if (s === "Preview") return AppState.isAdmin || isOwn;
-      return false;
-    });
+      if (s !== "Live") return false;
+
+      // Admins and the form's own author always see Live forms.
+      if (AppState.isAdmin || isOwn) return true;
+
+      const def = defMap.get(item.id);
+      const access = def?.access || "StaffStudents"; // default to broadest if definition missing
+
+      if (access === "StaffStudents") return true;        // everyone can see it
+
+      if (access === "StaffOnly") return !isStudent;      // hidden from students
+
+      if (access === "Specific") {
+        // Show only if the current user is explicitly listed in specificPeople.
+        const people = def?.specificPeople || [];
+        return people.some(p => (p.email || "").toLowerCase() === currentEmail);
+      }
+
+      return true; // unknown access value — fail open
+    }
+
+    const visible = items.filter(canSeeForm);
+
 
     if (!visible.length) {
       grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1;"><h3>No forms available</h3><p>Check back later.</p></div>`;
@@ -588,15 +634,6 @@ function refreshPersonChips(fieldId) {
       </button>
     </span>`;
   }).join("");
-}
-
-function clearPersonField(fieldId) {
-  if (window._liveFormState) {
-    window._liveFormState.formValues[fieldId] = [];
-  }
-  refreshPersonChips(fieldId);
-  const searchEl = document.getElementById(`person-search-${fieldId}`);
-  if (searchEl) searchEl.value = "";
 }
 
 
