@@ -28,9 +28,10 @@ async function renderLiveForms(container) {
     const isStudent = currentEmail.includes("@student.le.ac.uk") ||
                       currentEmail.includes("@student.leicester.ac.uk");
 
-    // Load definitions for all Live items in parallel so we can check the access field.
+    // Load definitions for all Live non-retro items in parallel so we can check the access field.
+    // Retro forms have no JSON definition and are only shown on the home page, not here.
     // Preview items don't need this — they are already restricted to admin/author only.
-    const liveItems = items.filter(i => i.fields?.Status === "Live");
+    const liveItems = items.filter(i => i.fields?.Status === "Live" && !i.fields?.[CONFIG.COL_RETRO]);
     const defResults = await Promise.allSettled(
       liveItems.map(i => getFormDefinition(CONFIG.FORMS_LIST, i.id))
     );
@@ -46,6 +47,9 @@ async function renderLiveForms(container) {
     function canSeeForm(item) {
       const s = item.fields?.Status;
       const isOwn = (item.createdBy?.user?.email || "").toLowerCase() === currentEmail;
+
+      // Retro forms are only shown on the home page — exclude them from this grid.
+      if (item.fields?.[CONFIG.COL_RETRO]) return false;
 
       // Preview: only admins and the form's own author see it.
       if (s === "Preview") return AppState.isAdmin || isOwn;
