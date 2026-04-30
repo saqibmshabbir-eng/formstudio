@@ -4,7 +4,7 @@
 // APP STATE
 // =============================================================
 const AppState = {
-  currentView: "my-requests",    // sidebar nav key
+  currentView: "home",           // sidebar nav key
   currentUser: null,             // { displayName, email, id }
   isAdmin: false,
   hasFormRequestAccess: false,
@@ -27,7 +27,6 @@ const AppState = {
   },
 
   // Lists data
-  myRequests: [],
   allRequests: [],
   liveForms: [],
 };
