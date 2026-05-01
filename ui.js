@@ -226,6 +226,7 @@ function renderAppShell() {
         <div class="sidebar-section-label" aria-hidden="true">${isAdmin ? "Admin" : "My Forms"}</div>
         ${navItem("admin-review", adminIcon(), "Form Requests")}
         ${navItem("new-form", newFormIcon(), "Form Builder")}
+        ${isAdmin ? navItem("admin-live", adminIcon(), "Live Forms") : ""}
         ` : ""}
       </nav>
 

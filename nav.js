@@ -71,6 +71,7 @@ function navigateTo(view) {
     "my-submissions": "My Submissions",
     "my-forms":       "My Forms",
     "admin-review":   "Form Requests",
+    "admin-live":     "Live Forms",
     "new-form":       "Form Builder",
   };
 
@@ -80,6 +81,7 @@ function navigateTo(view) {
     case "my-submissions": renderMySubmissions(main); break;
     case "my-forms":       renderMyForms(main); break;
     case "admin-review":   renderAdminReview(main); break;
+    case "admin-live":     renderAdminLive(main); break;
     case "new-form":       startNewForm(main); break;
     default:               renderHome(main);
   }
