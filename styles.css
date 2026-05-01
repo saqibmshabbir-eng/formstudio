@@ -1,4 +1,3 @@
-
 /* =================================================================
    THEME SYSTEM — CSS custom properties per theme
    Applied by setting data-theme attribute on <html>
@@ -159,10 +158,10 @@
   --accent2:      #ea4335;
   --accent-hover: #1557b0;
   --accent-glow:  rgba(26,115,232,0.2);
-  --topbar-bg:    #ffffff;
-  --topbar-text:  #202124;
-  --topbar-sub:   #5f6368;
-  --topbar-div:   #dadce0;
+  --topbar-bg:    #1a73e8;
+  --topbar-text:  #ffffff;
+  --topbar-sub:   rgba(255,255,255,0.75);
+  --topbar-div:   rgba(255,255,255,0.25);
   --sidebar-bg:   #f8f9fa;
   --sidebar-border: #e8eaed;
   --nav-active-bg: rgba(26,115,232,0.1);
@@ -215,10 +214,10 @@
   --accent2:      #5856d6;
   --accent-hover: #0062cc;
   --accent-glow:  rgba(0,122,255,0.2);
-  --topbar-bg:    rgba(242,242,247,0.85);
-  --topbar-text:  #000000;
-  --topbar-sub:   #6e6e73;
-  --topbar-div:   rgba(0,0,0,0.12);
+  --topbar-bg:    #1c1c1e;
+  --topbar-text:  #ffffff;
+  --topbar-sub:   rgba(255,255,255,0.6);
+  --topbar-div:   rgba(255,255,255,0.15);
   --sidebar-bg:   rgba(242,242,247,0.9);
   --sidebar-border: rgba(0,0,0,0.08);
   --nav-active-bg: rgba(0,122,255,0.1);
@@ -842,14 +841,14 @@ button.user-chip {
 [data-theme="apple"] .user-chip,
 [data-theme="google"] .user-chip,
 [data-theme="slate"] .user-chip {
-  background: var(--surface);
-  border-color: var(--border);
-  color: var(--topbar-text);
+  background: rgba(255,255,255,0.15);
+  border-color: rgba(255,255,255,0.25);
+  color: #ffffff;
 }
 [data-theme="apple"] .user-chip:hover,
 [data-theme="google"] .user-chip:hover,
 [data-theme="slate"] .user-chip:hover {
-  background: var(--surface2);
+  background: rgba(255,255,255,0.25);
 }
 
 .avatar {
