@@ -301,6 +301,32 @@ async function searchPeople(query) {
   return data.value || [];
 }
 
+// Resolve a user's SharePoint integer ID from their email.
+// SharePoint Person columns written via the Graph API require a SP numeric user ID
+// (as ColumnNameLookupId), not an Entra object ID or email string.
+// Results are cached in memory for the session to avoid redundant lookups.
+const _spUserIdCache = {};
+async function resolveSpUserId(email) {
+  if (!email) return null;
+  if (_spUserIdCache[email] !== undefined) return _spUserIdCache[email];
+  try {
+    const siteId = await getSiteId();
+    const data = await graphGet(
+      `/sites/${siteId}/lists('User Information List')/items?$filter=fields/EMail eq '${email}'&$expand=fields&$select=id,fields`
+    );
+    const item = data.value?.[0];
+    // fields.ID is the SharePoint integer user ID — item.id is the Graph GUID (not useful here)
+    const rawId = item?.fields?.ID ?? item?.fields?.id;
+    const spId = rawId != null ? parseInt(rawId, 10) : null;
+    _spUserIdCache[email] = spId;
+    return spId;
+  } catch (e) {
+    console.warn("[resolveSpUserId] Could not resolve SP user ID for", email, e.message);
+    _spUserIdCache[email] = null;
+    return null;
+  }
+}
+
 // Check admin status
 async function checkIsAdmin(userDisplayName, userEmail) {
   try {

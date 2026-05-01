@@ -9,6 +9,7 @@
 
 const WIZARD_STEPS = [
   { key: "identity",      label: "Identity" },
+  { key: "governance",    label: "Governance" },
   { key: "sections",      label: "Sections & Fields" },
   { key: "conditions",    label: "Conditions" },
   { key: "dependents",    label: "Linked Dropdowns" },
@@ -59,6 +60,13 @@ async function editRequest(itemId, container) {
       if (def.access)             AppState.builderForm.access             = def.access;
       if (def.layout)             AppState.builderForm.layout             = def.layout;
       if (def.submissionType)     AppState.builderForm.submissionType     = def.submissionType;
+      // Governance — merge saved values over the empty defaults so partial saves are safe
+      if (def.governance) {
+        AppState.builderForm.governance = Object.assign(
+          AppState.builderForm.governance,
+          def.governance
+        );
+      }
     }
 
     renderBuilder(container);
@@ -128,6 +136,7 @@ function renderWizardStep() {
   const step = WIZARD_STEPS[AppState.builderStep].key;
   switch (step) {
     case "identity":    renderStepIdentity(container); break;
+    case "governance":  renderStepGovernance(container); break;
     case "sections":    renderStepSections(container); break;
     case "conditions":  renderStepConditions(container); break;
     case "dependents":  renderStepDependents(container); break;
@@ -173,6 +182,26 @@ function validateCurrentStep() {
     AppState.builderForm.title = title;
     AppState.builderForm.listName = generateListName(title);
   }
+  if (step === "governance") {
+    // Capture all governance fields from the DOM into state
+    const g = AppState.builderForm.governance;
+    g.existingProcess       = document.getElementById("gov-existing-process")?.value || "";
+    g.existingProcessDetail = document.getElementById("gov-existing-process-detail")?.value?.trim() || "";
+    g.retention             = document.getElementById("gov-retention")?.value || "";
+    g.sensitiveData         = document.getElementById("gov-sensitive-data")?.value || "";
+    g.privacyAssessment     = document.getElementById("gov-privacy-assessment")?.value || "";
+    g.externalAccess        = document.getElementById("gov-external-access")?.value || "";
+    g.continuityPlan        = document.getElementById("gov-continuity-plan")?.value?.trim() || "";
+    g.expectedVolume        = document.getElementById("gov-expected-volume")?.value || "";
+    // g.dataOwner is set directly into state by the people-picker — no DOM read needed
+
+    // These fields are required — without them the admin cannot make an informed decision
+    if (!g.retention)          { showToast("error", "Please select a data retention period"); return false; }
+    if (!g.sensitiveData)      { showToast("error", "Please select a data sensitivity level"); return false; }
+    if (!g.privacyAssessment)  { showToast("error", "Please select whether a Privacy Impact Assessment has been completed"); return false; }
+    if (!g.externalAccess)     { showToast("error", "Please select an external access option"); return false; }
+    if (!g.dataOwner)          { showToast("error", "Please select a data owner — e.g. your Dept Head"); return false; }
+  }
   return true;
 }
 // ---- Step 1: Identity ----
@@ -209,8 +238,217 @@ function generateListName(title) {
     .join("")
     .slice(0, 60) || "FormList";
 }
-// ---- Step 2: Sections & Fields ----
-function renderStepSections(container) {
+// ---- Step 2: Governance ----
+function renderStepGovernance(container) {
+  const g = AppState.builderForm.governance;
+  const showDetail = g.existingProcess === "yes";
+
+  container.innerHTML = html`
+    <div style="display:flex;flex-direction:column;gap:16px;">
+
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Governance & Suitability</div>
+            <div class="card-subtitle">These answers help us determine whether SharePoint Lists is the right storage for this form's data</div>
+          </div>
+        </div>
+        <div class="card-body" style="display:flex;flex-direction:column;gap:20px;">
+
+          <!-- Existing process -->
+          <div class="form-group">
+            <label for="gov-existing-process">Is this form based on an existing process?</label>
+            <select id="gov-existing-process" class="select"
+              onchange="
+                AppState.builderForm.governance.existingProcess=this.value;
+                const d=document.getElementById('gov-existing-process-detail-group');
+                if(d) d.style.display=this.value==='yes'?'':'none';
+              ">
+              <option value="" ${!g.existingProcess ? "selected" : ""}>— Select —</option>
+              <option value="yes" ${g.existingProcess === "yes" ? "selected" : ""}>Yes — this replaces or digitises an existing process</option>
+              <option value="no"  ${g.existingProcess === "no"  ? "selected" : ""}>No — this is a brand new process</option>
+            </select>
+          </div>
+
+          <div class="form-group" id="gov-existing-process-detail-group" style="${showDetail ? "" : "display:none"}">
+            <label for="gov-existing-process-detail">Briefly describe the existing process</label>
+            <textarea id="gov-existing-process-detail" class="textarea" rows="2"
+              placeholder="e.g. Currently handled via a paper form submitted to the departmental office">${g.existingProcessDetail}</textarea>
+          </div>
+
+          <!-- Retention -->
+          <div class="form-group">
+            <label for="gov-retention">Data retention — how long do you need to store submissions? *</label>
+            <select id="gov-retention" class="select">
+              <option value=""          ${!g.retention            ? "selected" : ""}>— Select —</option>
+              <option value="under1"    ${g.retention==="under1"  ? "selected" : ""}>Less than 1 year</option>
+              <option value="1to3"      ${g.retention==="1to3"    ? "selected" : ""}>1 – 3 years</option>
+              <option value="3to7"      ${g.retention==="3to7"    ? "selected" : ""}>3 – 7 years</option>
+              <option value="indefinite"${g.retention==="indefinite"?"selected":""}>Indefinitely / unknown</option>
+            </select>
+            <span class="input-hint">SharePoint has no automated purge — longer retention periods require a manual process or Purview retention policy</span>
+          </div>
+
+          <!-- Sensitive data -->
+          <div class="form-group">
+            <label for="gov-sensitive-data">Data sensitivity — what type of sensitive information will this form collect? *</label>
+            <select id="gov-sensitive-data" class="select">
+              <option value=""         ${!g.sensitiveData             ? "selected" : ""}>— Select —</option>
+              <option value="none"     ${g.sensitiveData==="none"     ? "selected" : ""}>No sensitive data</option>
+              <option value="personal" ${g.sensitiveData==="personal" ? "selected" : ""}>Special category personal data (e.g. bank details, health information)</option>
+              <option value="commercial"${g.sensitiveData==="commercial"?"selected":""}>Commercially sensitive information</option>
+              <option value="both"     ${g.sensitiveData==="both"     ? "selected" : ""}>Both personal and commercially sensitive</option>
+            </select>
+            <span class="input-hint">Bank details and health data should not be stored in a standard SharePoint list — select this to flag for admin review</span>
+          </div>
+
+          <!-- Privacy Impact Assessment -->
+          <div class="form-group">
+            <label for="gov-privacy-assessment">Has a Privacy Impact Assessment (PIA / DPIA) been completed for this process? *</label>
+            <select id="gov-privacy-assessment" class="select">
+              <option value=""    ${!g.privacyAssessment         ? "selected" : ""}>— Select —</option>
+              <option value="yes" ${g.privacyAssessment==="yes"  ? "selected" : ""}>Yes — a PIA / DPIA has been completed</option>
+              <option value="no"  ${g.privacyAssessment==="no"   ? "selected" : ""}>No — one has not been done</option>
+              <option value="na"  ${g.privacyAssessment==="na"   ? "selected" : ""}>Not applicable — no personal data is collected</option>
+            </select>
+            <span class="input-hint">Required under UK GDPR for high-risk processing. A "No" answer will be flagged for the Data Protection team</span>
+          </div>
+
+          <!-- External access -->
+          <div class="form-group">
+            <label for="gov-external-access">External access — will people outside the University be involved with this data? *</label>
+            <select id="gov-external-access" class="select">
+              <option value=""           ${!g.externalAccess               ? "selected" : ""}>— Select —</option>
+              <option value="none"       ${g.externalAccess==="none"       ? "selected" : ""}>No — internal use only</option>
+              <option value="recipients" ${g.externalAccess==="recipients" ? "selected" : ""}>Yes — submission data will be shared with external parties</option>
+              <option value="submitters" ${g.externalAccess==="submitters" ? "selected" : ""}>Yes — external people will submit this form</option>
+            </select>
+            <span class="input-hint">External sharing requires specific SharePoint tenant settings and may have data transfer implications</span>
+          </div>
+
+          <!-- Continuity plan -->
+          <div class="form-group">
+            <label for="gov-continuity-plan">Continuity plan — if this form stops working, what is the workaround? *</label>
+            <textarea id="gov-continuity-plan" class="textarea" rows="2"
+              placeholder="e.g. Staff would revert to emailing requests directly to the team inbox">${g.continuityPlan}</textarea>
+            <span class="input-hint">Helps us understand how business-critical this form is and plan maintenance windows accordingly</span>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Additional Information</div>
+            <div class="card-subtitle">Optional but recommended</div>
+          </div>
+        </div>
+        <div class="card-body" style="display:flex;flex-direction:column;gap:20px;">
+
+          <!-- Expected volume -->
+          <div class="form-group">
+            <label for="gov-expected-volume">Expected submission volume</label>
+            <select id="gov-expected-volume" class="select">
+              <option value=""      ${!g.expectedVolume          ? "selected" : ""}>— Select —</option>
+              <option value="low"   ${g.expectedVolume==="low"   ? "selected" : ""}>Low — fewer than 100 submissions per month</option>
+              <option value="medium"${g.expectedVolume==="medium"? "selected" : ""}>Medium — 100 – 1,000 per month</option>
+              <option value="high"  ${g.expectedVolume==="high"  ? "selected" : ""}>High — more than 1,000 per month</option>
+            </select>
+            <span class="input-hint">SharePoint list performance can degrade at high volumes — large-scale forms may need a different storage solution</span>
+          </div>
+
+          <!-- Data owner -->
+          <div class="form-group">
+            <label for="gov-data-owner-search">Data owner *</label>
+            ${safeHtml(g.dataOwner ? html`
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                <span class="person-chip">
+                  <div class="avatar" style="width:20px;height:20px;font-size:9px;">${g.dataOwner.displayName.split(" ").map(n=>n[0]).join("").slice(0,2)}</div>
+                  ${g.dataOwner.displayName}
+                  <button onclick="removeDataOwner()" aria-label="Remove data owner">
+                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 1l8 8M9 1L1 9"/></svg>
+                  </button>
+                </span>
+              </div>
+            ` : html`
+              <div class="flex gap-2">
+                <input id="gov-data-owner-search" class="input" placeholder="Search by name or email…"
+                  oninput="debouncedDataOwnerSearch(this.value)">
+                <button class="btn btn-secondary" onclick="searchDataOwnerNow()">Search</button>
+              </div>
+              <div id="gov-data-owner-results" style="margin-top:8px;"></div>
+            `)}
+            <span class="input-hint">The person accountable for this data if a Subject Access Request or data breach occurs — e.g. your Dept Head</span>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  `;
+}
+
+// ---- Data Owner people-picker (governance step) ----
+// Exactly one person, not a list — selecting a person replaces any previous selection.
+
+let _dataOwnerSearchTimeout = null;
+function debouncedDataOwnerSearch(val) {
+  clearTimeout(_dataOwnerSearchTimeout);
+  _dataOwnerSearchTimeout = setTimeout(() => searchDataOwnerNow(val), 400);
+}
+
+async function searchDataOwnerNow(queryOverride) {
+  const query = queryOverride !== undefined ? queryOverride : document.getElementById("gov-data-owner-search")?.value;
+  if (!query || query.length < 2) return;
+  const resultsEl = document.getElementById("gov-data-owner-results");
+  if (!resultsEl) return;
+  resultsEl.innerHTML = `<span class="spinner"></span>`;
+  try {
+    const people = await searchPeople(query);
+    if (!people.length) {
+      resultsEl.innerHTML = `<p style="font-size:12.5px;color:var(--text3);">No results found.</p>`;
+      return;
+    }
+    resultsEl.innerHTML = html`
+      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;">
+        ${safeHtml(people.slice(0, 6).map(p => html`
+          <div class="flex items-center gap-2" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);"
+            data-id="${p.id}"
+            data-name="${p.displayName}"
+            data-email="${p.scoredEmailAddresses?.[0]?.address || ""}"
+            onclick="setDataOwnerFromEl(this)"
+            onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background=''">
+            <div class="avatar" style="width:24px;height:24px;font-size:10px;">${p.displayName.split(" ").map(n=>n[0]).join("").slice(0,2)}</div>
+            <div style="flex:1;">
+              <div style="font-size:13px;">${p.displayName}</div>
+              <div style="font-size:11.5px;color:var(--text3);">${p.scoredEmailAddresses?.[0]?.address || ""}</div>
+            </div>
+          </div>
+        `).join(""))}
+      </div>
+    `;
+  } catch (e) {
+    resultsEl.innerHTML = html`<p style="font-size:12.5px;color:var(--red)">Search failed: ${e.message}</p>`;
+  }
+}
+
+function setDataOwnerFromEl(el) {
+  AppState.builderForm.governance.dataOwner = {
+    id:          el.dataset.id,
+    displayName: el.dataset.name,
+    email:       el.dataset.email,
+  };
+  // Re-render just the governance step so the chip appears and the search disappears
+  renderStepGovernance(document.getElementById("wizard-step-content"));
+}
+
+function removeDataOwner() {
+  AppState.builderForm.governance.dataOwner = null;
+  renderStepGovernance(document.getElementById("wizard-step-content"));
+}
+
+// ---- Step 3: Sections & Fields ----
   const { sections } = AppState.builderForm;
 
   container.innerHTML = html`
@@ -976,10 +1214,16 @@ function addPerson(id, displayName, email) {
   }
   renderStepAccess(document.getElementById("wizard-step-content"));
 }
-// ---- Step 7: Review ----
 function renderStepReview(container) {
-  const { title, listName, sections, layout, access, specificPeople, formManagers, submissionType, conditions, dependentDropdowns } = AppState.builderForm;
+  const { title, listName, sections, layout, access, specificPeople, formManagers, submissionType, conditions, dependentDropdowns, governance: g } = AppState.builderForm;
   const allFields = getAllFields();
+
+  // Human-readable labels for governance select values
+  const retentionLabels   = { under1: "< 1 year", "1to3": "1–3 years", "3to7": "3–7 years", indefinite: "Indefinite" };
+  const sensitiveLabels   = { none: "No sensitive data", personal: "Special category personal data", commercial: "Commercially sensitive", both: "Personal & commercial" };
+  const privacyLabels     = { yes: "Yes — completed", no: "No — not done", na: "Not applicable" };
+  const externalLabels    = { none: "Internal only", recipients: "Data shared externally", submitters: "External submitters" };
+  const volumeLabels      = { low: "Low (< 100/month)", medium: "Medium (100–1,000/month)", high: "High (> 1,000/month)" };
 
   container.innerHTML = html`
     <div style="display:flex;flex-direction:column;gap:16px;">
@@ -1013,6 +1257,49 @@ function renderStepReview(container) {
               <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);margin-bottom:4px;">Total Fields</div>
               <div>${allFields.length} across ${sections.length} section${sections.length !== 1 ? "s" : ""}</div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Governance summary -->
+      <div class="card">
+        <div class="card-header"><div class="card-title">Governance</div></div>
+        <div class="card-body">
+          <div class="grid-2" style="gap:24px;">
+            <div>
+              <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);margin-bottom:4px;">Existing Process</div>
+              <div>${g.existingProcess === "yes" ? "Yes" : g.existingProcess === "no" ? "No" : "—"}${safeHtml(g.existingProcess === "yes" && g.existingProcessDetail ? html`<div style="font-size:12px;color:var(--text2);margin-top:2px;">${g.existingProcessDetail}</div>` : "")}</div>
+            </div>
+            <div>
+              <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);margin-bottom:4px;">Data Retention</div>
+              <div>${retentionLabels[g.retention] || "—"}</div>
+            </div>
+            <div>
+              <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);margin-bottom:4px;">Data Sensitivity</div>
+              <div style="${(g.sensitiveData === "personal" || g.sensitiveData === "both") ? "color:var(--amber,#d97706);font-weight:500;" : ""}">${sensitiveLabels[g.sensitiveData] || "—"}</div>
+            </div>
+            <div>
+              <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);margin-bottom:4px;">Privacy Assessment</div>
+              <div style="${g.privacyAssessment === "no" ? "color:var(--amber,#d97706);font-weight:500;" : ""}">${privacyLabels[g.privacyAssessment] || "—"}</div>
+            </div>
+            <div>
+              <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);margin-bottom:4px;">External Access</div>
+              <div>${externalLabels[g.externalAccess] || "—"}</div>
+            </div>
+            <div>
+              <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);margin-bottom:4px;">Expected Volume</div>
+              <div>${volumeLabels[g.expectedVolume] || "—"}</div>
+            </div>
+            ${safeHtml(g.dataOwner ? html`
+            <div>
+              <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);margin-bottom:4px;">Data Owner</div>
+              <div>${g.dataOwner.displayName}</div>
+            </div>` : "")}
+            ${safeHtml(g.continuityPlan ? html`
+            <div style="grid-column:1/-1;">
+              <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);margin-bottom:4px;">Continuity Plan</div>
+              <div style="font-size:13.5px;color:var(--text2);">${g.continuityPlan}</div>
+            </div>` : "")}
           </div>
         </div>
       </div>
@@ -1139,13 +1426,36 @@ async function saveBuilderDraft() {
       submissionType: form.submissionType,
       conditions: form.conditions,
       dependentDropdowns: form.dependentDropdowns,
+      governance: form.governance,
     };
 
     // SP columns written: Title, Status (new only), ListName, FormDefinition (via uploadJsonAttachment)
-    // Everything else lives in the JSON definition
+    // Governance columns promoted to SP for filtering/reporting by admins
+    const gov = form.governance;
+    const govFields = {
+      [CONFIG.COL_GOV_RETENTION]:    gov.retention       || "",
+      [CONFIG.COL_GOV_SENSITIVE]:    gov.sensitiveData   || "",
+      [CONFIG.COL_GOV_PRIVACY]:      gov.privacyAssessment || "",
+      [CONFIG.COL_GOV_EXTERNAL]:     gov.externalAccess  || "",
+      [CONFIG.COL_GOV_VOLUME]:       gov.expectedVolume  || "",
+    };
+
+    // Data owner is a Person column — resolve their SP integer user ID first
+    if (gov.dataOwner?.email) {
+      try {
+        const spUserId = await resolveSpUserId(gov.dataOwner.email);
+        if (spUserId) {
+          govFields[CONFIG.COL_GOV_DATA_OWNER + "LookupId"] = spUserId;
+        }
+      } catch (e) {
+        console.warn("[saveBuilderDraft] Could not resolve SP user ID for data owner:", e.message);
+      }
+    }
+
     const fields = {
       Title:               form.title || "Untitled",
       [CONFIG.COL_LISTNAME]: form.listName || generateListName(form.title),
+      ...govFields,
     };
 
     let itemId = AppState.builderItemId;

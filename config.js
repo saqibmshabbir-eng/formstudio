@@ -37,6 +37,21 @@ const CONFIG = {
   COL_RETRO:         "Retro",          // Yes/No — marks an externally-owned SP list form
   COL_LIST_LOCATION: "ListLocation",   // Single line text — SP new item URL for retro forms
   COL_VIEW_URL:      "ViewUrl",        // Single line text — URL to view submissions for retro forms
+
+  // Governance columns — promoted to SP list columns for admin filtering and reporting
+  // ACTION REQUIRED: Add these columns to the Forms list in SharePoint:
+  //   GovRetention    (single line text)
+  //   GovSensitive    (single line text)
+  //   GovPrivacy      (single line text)
+  //   GovExternal     (single line text)
+  //   GovVolume       (single line text)
+  //   GovDataOwner    (Person or Group — single selection, allow only internal users)
+  COL_GOV_RETENTION:    "GovRetention",
+  COL_GOV_SENSITIVE:    "GovSensitive",
+  COL_GOV_PRIVACY:      "GovPrivacy",
+  COL_GOV_EXTERNAL:     "GovExternal",
+  COL_GOV_VOLUME:       "GovVolume",
+  COL_GOV_DATA_OWNER:   "GovDataOwner", // Person column — written as GovDataOwnerLookupId
   SUBMITTER_ROLE: "Form Submitter", // Custom SP role: AddListItems + ViewListItems (own items only)
 
   // Microsoft Graph API base URL

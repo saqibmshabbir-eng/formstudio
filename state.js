@@ -24,6 +24,17 @@ const AppState = {
     submissionType: "Submit",
     conditions: [],             // [{showFieldId, whenFieldId, equalsValue}]
     dependentDropdowns: [],     // [{childFieldId, parentFieldId, mapping: {parentVal: [childVals]}}]
+    governance: {
+      existingProcess:    "",   // "yes" | "no" | "" — is this based on an existing process?
+      existingProcessDetail: "", // free text — describe the existing process
+      retention:          "",   // "under1" | "1to3" | "3to7" | "indefinite" | ""
+      sensitiveData:      "",   // "none" | "personal" | "commercial" | "both" | ""
+      privacyAssessment:  "",   // "yes" | "no" | "na" | ""
+      externalAccess:     "",   // "none" | "recipients" | "submitters" | ""
+      continuityPlan:     "",   // free text — workaround if form stops working
+      expectedVolume:     "",   // "low" | "medium" | "high" | ""
+      dataOwner:          null, // { id, displayName, email } | null — SP Person column
+    },
   },
 
   // Lists data
@@ -46,5 +57,16 @@ function resetBuilderForm() {
     submissionType: "Submit",
     conditions: [],
     dependentDropdowns: [],
+    governance: {
+      existingProcess:       "",
+      existingProcessDetail: "",
+      retention:             "",
+      sensitiveData:         "",
+      privacyAssessment:     "",
+      externalAccess:        "",
+      continuityPlan:        "",
+      expectedVolume:        "",
+      dataOwner:             null, // { id, displayName, email } | null
+    },
   };
 }
