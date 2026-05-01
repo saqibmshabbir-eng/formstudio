@@ -449,6 +449,7 @@ function removeDataOwner() {
 }
 
 // ---- Step 3: Sections & Fields ----
+function renderStepSections(container) {
   const { sections } = AppState.builderForm;
 
   container.innerHTML = html`
