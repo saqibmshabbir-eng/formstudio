@@ -118,7 +118,7 @@ async function login() {
     accessToken = result.accessToken;
     updateProgress("Signed in. Loading your workspace…");
     await bootApp();
-    // bootApp() replaces the entire shell, so no explicit hideProgress() needed.
+    hideProgress();
   } catch (e) {
     hideProgress();
     showLoginLoading(false);
