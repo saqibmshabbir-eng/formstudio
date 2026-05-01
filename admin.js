@@ -561,7 +561,7 @@ async function renderAdminLive(container) {
     const items = await getListItems(CONFIG.FORMS_LIST);
     const deployed = items.filter(i => {
       const s = i.fields?.[CONFIG.COL_STATUS] || "";
-      return (s === "Preview" || s === "Live") && !i.fields?.[CONFIG.COL_RETRO];
+      return s === "Live" && !i.fields?.[CONFIG.COL_RETRO];
     });
     const card = document.getElementById("admin-live-table");
 
@@ -591,14 +591,10 @@ async function renderAdminLive(container) {
                 <td>${safeHtml(statusBadge(f[CONFIG.COL_STATUS]||"—"))}</td>
                 <td style="color:var(--text2);font-size:13px;">${accessLabel}</td>
                 <td>
-                  ${safeHtml(f[CONFIG.COL_STATUS] === "Preview" ? html`
-                    <button class="btn btn-sm btn-primary" data-id="${item.id}" onclick="promoteToLive(this.dataset.id)">Promote to Live</button>
-                  ` : html`
-                    <div class="flex gap-2" style="gap:6px;">
-                      <span style="font-size:12px;color:var(--text3);line-height:28px;">Live</span>
-                      <button class="btn btn-sm btn-secondary" data-id="${item.id}" onclick="openSafeEditModal(this.dataset.id)">Edit Details</button>
-                    </div>
-                  `)}
+                  <div class="flex gap-2" style="gap:6px;">
+                    <span style="font-size:12px;color:var(--text3);line-height:28px;">Live</span>
+                    <button class="btn btn-sm btn-secondary" data-id="${item.id}" onclick="openSafeEditModal(this.dataset.id)">Edit Details</button>
+                  </div>
                 </td>
               </tr>`;
             }).join(""))}
