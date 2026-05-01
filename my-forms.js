@@ -315,7 +315,7 @@ function renderSubmissionsTable(container) {
                   const f = item.fields || {};
                   const hasAttachment = f.Attachments === true || f.Attachments === 1 || item.hasAttachments === true;
                   return html`<tr style="cursor:pointer;" data-id="${item.id}"
-                    onmouseover="this.style.background='#f0f4ff'" onmouseout="this.style.background=''">
+                    onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
                     ${safeHtml(visibleFields.map(field => html`
                       <td onclick="viewSubmission('${item.id}')">${formatFieldValue(f[field.internalName || field.label]).slice(0, 80)}</td>
                     `).join(""))}

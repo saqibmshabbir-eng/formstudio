@@ -93,8 +93,8 @@ function renderFormRow(item) {
   return html`
     <div data-id="${item.id}" onclick="${onclick}"
       style="background:var(--input-bg);border:1px solid var(--input-border);border-radius:var(--radius-sm);padding:12px 16px;cursor:pointer;transition:var(--transition);display:flex;align-items:center;gap:12px;"
-      onmouseover="this.style.borderColor='var(--input-focus)';this.style.background='#f0f4ff'"
-      onmouseout="this.style.borderColor='var(--border)';this.style.background='#fff'">
+      onmouseover="this.style.borderColor='var(--input-focus)';this.style.background='var(--surface2)'"
+      onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--input-bg)'">
       <div style="width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;flex-shrink:0;">
         ${safeHtml(isRetro
           ? `<svg width="14" height="14" viewBox="0 0 16 16" fill="white"><path d="M2 2h12v12H2z" stroke="white" stroke-width="1" fill="none"/><path d="M5 6h6M5 8h6M5 10h4" stroke="white" stroke-width="1.2" stroke-linecap="round"/></svg>`
@@ -147,7 +147,7 @@ async function showFormsModal() {
         return html`
         <div data-id="${item.id}" onclick="${onclick}"
           style="padding:12px 0;border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;gap:10px;"
-          onmouseover="this.style.background='#f0f4ff';this.style.margin='0 -4px';this.style.padding='12px 4px'"
+          onmouseover="this.style.background='var(--surface2)';this.style.margin='0 -4px';this.style.padding='12px 4px'"
           onmouseout="this.style.background='';this.style.margin='';this.style.padding='12px 0'"
           data-title="${(f.Title||'').toLowerCase()}">
           <div style="width:28px;height:28px;border-radius:6px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;flex-shrink:0;">
