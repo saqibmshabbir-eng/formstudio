@@ -507,9 +507,9 @@ function renderConditionRule(c, ci, allFields) {
       { value: "eq",  label: "equals" },
       { value: "neq", label: "not equals" },
       { value: "gt",  label: "greater than" },
-      { value: "gte", label: "≥" },
+      { value: "gte", label: "greater than or equal to" },
       { value: "lt",  label: "less than" },
-      { value: "lte", label: "≤" },
+      { value: "lte", label: "less than or equal to" },
     ];
   } else if (dateTypes.includes(triggerType)) {
     operators = [
