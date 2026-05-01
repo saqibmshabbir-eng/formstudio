@@ -593,7 +593,12 @@ async function renderAdminLive(container) {
                 <td>
                   ${safeHtml(f[CONFIG.COL_STATUS] === "Preview" ? html`
                     <button class="btn btn-sm btn-primary" data-id="${item.id}" onclick="promoteToLive(this.dataset.id)">Promote to Live</button>
-                  ` : `<span style="font-size:12px;color:var(--text3);">Live</span>`)}
+                  ` : html`
+                    <div class="flex gap-2" style="gap:6px;">
+                      <span style="font-size:12px;color:var(--text3);line-height:28px;">Live</span>
+                      <button class="btn btn-sm btn-secondary" data-id="${item.id}" onclick="openSafeEditModal(this.dataset.id)">Edit Details</button>
+                    </div>
+                  `)}
                 </td>
               </tr>`;
             }).join(""))}
@@ -729,13 +734,13 @@ function buildColumnDefinition(field) {
     case "Boolean":     return { ...base, boolean: {} };
     case "URL":         return { ...base, hyperlinkOrPicture: { isPicture: false } };
     case "User":        return { ...base, personOrGroup: { allowMultipleSelection: true } };
-    case "Choice":
+    case "Choice":      return { ...base, text: {} }; // choices are renderer-only; SP stores the selected value as plain text
     case "MultiChoice": return {
       ...base,
       choice: {
         choices: field.choices || [],
         allowTextEntry: false,
-        displayAs: field.type === "MultiChoice" ? "checkBoxes" : "dropDownMenu",
+        displayAs: "checkBoxes",
       }
     };
     default:
@@ -867,4 +872,208 @@ async function setListPermissions(siteId, graphListId, access, specificPeople = 
   }
 
   updateProgress("Permissions set successfully");
+}
+
+// =============================================================
+// SAFE EDIT — Live form metadata editing
+// Only touches the JSON definition and SP column displayName/description.
+// Never deletes the data list, never changes status, never touches internalName.
+// Only Choice fields benefit from free choice editing (they are text columns in SP).
+// MultiChoice choices are shown read-only because they are SP choice columns.
+// =============================================================
+
+async function openSafeEditModal(itemId) {
+  // Re-load fresh from server — never mutate a stale in-memory copy
+  let def;
+  try {
+    def = await getFormDefinition(CONFIG.FORMS_LIST, itemId);
+    if (!def) throw new Error("Form definition not found");
+  } catch (e) {
+    showToast("error", "Could not load form definition: " + e.message);
+    return;
+  }
+
+  const allSections = def.sections || [];
+
+  openModal(html`
+    <div class="modal-header">
+      <span class="modal-title">Edit Live Form Details</span>
+      <button class="btn btn-ghost btn-icon btn-sm" onclick="closeModal()">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 1l12 12M13 1L1 13"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:16px;max-height:70vh;overflow-y:auto;">
+
+      <div style="padding:10px 14px;background:rgba(34,197,94,0.07);border:1px solid rgba(34,197,94,0.2);border-radius:var(--radius-sm);font-size:13px;color:var(--text2);">
+        The SharePoint data list and all submissions are preserved. Only display metadata is changed.
+      </div>
+
+      <div class="form-group">
+        <label style="font-weight:600;">Form Title</label>
+        <input id="se-title" class="input" value="${escHtml(def.title || "")}">
+        <span class="input-hint">Shown in the form directory and header</span>
+      </div>
+
+      <div style="border-top:1px solid var(--border);padding-top:16px;">
+        ${safeHtml(allSections.map((sec, si) => `
+          <div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:12px;">
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);margin-bottom:10px;">
+              Section ${si + 1}
+            </div>
+            <div class="form-group" style="margin-bottom:12px;">
+              <label>Section Title</label>
+              <input class="input se-section-title" data-si="${si}" value="${escHtml(sec.title || "")}">
+            </div>
+            ${(sec.fields || []).map((field, fi) => renderSafeEditField(field, si, fi)).join("")}
+          </div>
+        `).join(""))}
+      </div>
+
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" data-id="${itemId}" onclick="doSafeEdit(this.dataset.id)">Save Changes</button>
+    </div>
+  `, false, true);
+}
+
+function renderSafeEditField(field, si, fi) {
+  // InfoText: only the HTML content is editable — no SP column involved
+  if (field.type === "InfoText") {
+    return html`
+      <div style="padding:10px 0;border-top:1px solid var(--border);margin-top:4px;">
+        <div style="font-size:11px;font-family:var(--mono);color:var(--text3);margin-bottom:6px;">InfoText</div>
+        <div class="form-group">
+          <label>Content (HTML)</label>
+          <textarea class="textarea se-info-content" data-si="${si}" data-fi="${fi}" rows="3">${escHtml(field.infoContent || "")}</textarea>
+        </div>
+      </div>
+    `;
+  }
+
+  // Choice: SP column is plain text — choices array is purely renderer-side, fully editable
+  const choicesBlock = (field.type === "Choice") ? html`
+    <div class="form-group">
+      <label>Choices <span style="font-size:11px;color:var(--text3);font-weight:400;">(one per line — add or reorder freely)</span></label>
+      <textarea class="textarea se-choices" data-si="${si}" data-fi="${fi}" rows="5">${escHtml((field.choices || []).join("\n"))}</textarea>
+    </div>
+  ` : (field.type === "MultiChoice") ? html`
+    <div style="padding:8px 10px;background:var(--bg3);border-radius:var(--radius-sm);font-size:12px;color:var(--text3);">
+      MultiChoice options are locked — stored as an SP choice column. Use the full edit workflow to change them.
+    </div>
+  ` : "";
+
+  return html`
+    <div style="padding:10px 0;border-top:1px solid var(--border);margin-top:4px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="font-size:11px;font-family:var(--mono);color:var(--text3);">${field.type}</span>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
+          <input type="checkbox" class="se-required" data-si="${si}" data-fi="${fi}" ${field.required ? "checked" : ""}> Required
+        </label>
+      </div>
+      <div class="form-group">
+        <label>Label</label>
+        <input class="input se-label" data-si="${si}" data-fi="${fi}" value="${escHtml(field.label || "")}">
+      </div>
+      <div class="form-group">
+        <label>Description / hint</label>
+        <input class="input se-desc" data-si="${si}" data-fi="${fi}" value="${escHtml(field.description || "")}">
+      </div>
+      ${safeHtml(choicesBlock)}
+    </div>
+  `;
+}
+
+async function doSafeEdit(itemId) {
+  showProgress("Saving", "Updating form definition…");
+  try {
+    // Always reload from server as the base — never trust the DOM alone
+    const def = await getFormDefinition(CONFIG.FORMS_LIST, itemId);
+    if (!def) throw new Error("Could not reload form definition");
+
+    // ── Patch form title ──────────────────────────────────────
+    const newTitle = document.getElementById("se-title")?.value.trim();
+    if (newTitle) def.title = newTitle;
+
+    // ── Patch section titles ──────────────────────────────────
+    document.querySelectorAll(".se-section-title").forEach(el => {
+      const si = parseInt(el.dataset.si);
+      if (def.sections[si]) def.sections[si].title = el.value;
+    });
+
+    // ── Patch field metadata ──────────────────────────────────
+    // label, description, required, infoContent — never touch id, type, internalName
+    document.querySelectorAll(".se-label").forEach(el => {
+      const field = def.sections[parseInt(el.dataset.si)]?.fields?.[parseInt(el.dataset.fi)];
+      if (field) field.label = el.value;
+    });
+    document.querySelectorAll(".se-desc").forEach(el => {
+      const field = def.sections[parseInt(el.dataset.si)]?.fields?.[parseInt(el.dataset.fi)];
+      if (field) field.description = el.value;
+    });
+    document.querySelectorAll(".se-required").forEach(el => {
+      const field = def.sections[parseInt(el.dataset.si)]?.fields?.[parseInt(el.dataset.fi)];
+      if (field) field.required = el.checked;
+    });
+    document.querySelectorAll(".se-info-content").forEach(el => {
+      const field = def.sections[parseInt(el.dataset.si)]?.fields?.[parseInt(el.dataset.fi)];
+      if (field && field.type === "InfoText") field.infoContent = el.value;
+    });
+
+    // ── Patch Choice choices (Choice only — MultiChoice is SP-locked) ─────
+    // Choices may be freely added, removed, or reordered because Choice columns
+    // are stored as plain text in SP — the stored value is just a string.
+    document.querySelectorAll(".se-choices").forEach(el => {
+      const field = def.sections[parseInt(el.dataset.si)]?.fields?.[parseInt(el.dataset.fi)];
+      if (field && field.type === "Choice") {
+        field.choices = el.value.split("\n").map(c => c.trim()).filter(Boolean);
+      }
+    });
+
+    // ── Write updated JSON back ───────────────────────────────
+    updateProgress("Writing form definition…");
+    await uploadJsonAttachment(CONFIG.FORMS_LIST, itemId, "form-definition.json", def);
+
+    // ── Sync SP Forms list Title column ──────────────────────
+    if (newTitle) {
+      await updateListItem(CONFIG.FORMS_LIST, itemId, { Title: newTitle });
+    }
+
+    // ── Best-effort: patch SP column displayNames and descriptions ────────
+    // Choice fields are text columns — Graph accepts displayName + description patches.
+    // This keeps the SP list view column headers in sync with the form labels.
+    // Failures here are non-fatal — the form still works correctly via internalName.
+    try {
+      updateProgress("Syncing column labels…");
+      const siteId = await getSiteId();
+      const lists = await graphGet(`/sites/${siteId}/lists`);
+      const spList = (lists.value || []).find(l => l.displayName === def.listName);
+      if (spList) {
+        const allFields = (def.sections || []).flatMap(s => s.fields || []);
+        for (const field of allFields) {
+          if (!field.internalName) continue;
+          if (field.type === "InfoText" || field.type === "FileUpload") continue;
+          try {
+            await graphPatch(
+              `/sites/${siteId}/lists/${spList.id}/columns/${field.internalName}`,
+              { displayName: field.label, description: field.description || "" }
+            );
+          } catch (e) {
+            if (CONFIG.DEBUG_LOGGING) console.warn(`[SafeEdit] Column patch skipped for "${field.internalName}":`, e.message);
+          }
+        }
+      }
+    } catch (e) {
+      if (CONFIG.DEBUG_LOGGING) console.warn("[SafeEdit] SP column sync failed (non-fatal):", e.message);
+    }
+
+    hideProgress();
+    closeModal();
+    showToast("success", "Form details updated — submissions are unaffected");
+    renderAdminLive(document.getElementById("main-content"));
+
+  } catch (e) {
+    hideProgress();
+    showToast("error", "Save failed: " + e.message);
+  }
 }
