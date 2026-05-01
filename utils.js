@@ -23,7 +23,6 @@ function showUserMenu() {
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal()">Close</button>
-      <button class="btn btn-secondary" onclick="closeModal();forceRefreshToken().then(()=>showToast('success','Token refreshed')).catch(e=>showToast('error',e.message))" title="Use this if you get Access Token errors">↻ Refresh Token</button>
       <button class="btn btn-danger" onclick="logout()">Sign Out</button>
     </div>
   `);
