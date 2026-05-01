@@ -89,10 +89,11 @@ async function renderAdminReview(container) {
               const isPreview   = status === "Preview";
               const isLocked    = ["Approved","Live","Rejected"].includes(status);
 
-              // Authors: Submit + Edit on Created only. Recall on Submitted only.
+              // Authors: Submit + Edit + Delete on Created only. Recall on Submitted only.
               const canSubmit     = isOwn && isCreated;
               const authorCanEdit = isOwn && isCreated;
               const canRecall     = isOwn && isSubmitted;
+              const canDelete     = isOwn && isCreated;
               // Admins: Edit on Submitted and Preview (Preview triggers warning)
               const adminCanEdit  = isAdmin && (isSubmitted || isPreview);
 
@@ -127,6 +128,12 @@ async function renderAdminReview(container) {
                       <button class="btn btn-sm btn-secondary" data-id="${item.id}" data-preview="${isPreview}" data-created="${isCreated}" onclick="handleEditRequest(this)">
                         <svg width="12" height="12" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9.5 1.5l2 2-8 8H1.5v-2l8-8z"/></svg>
                         Edit
+                      </button>
+                    ` : "")}
+                    ${safeHtml(canDelete ? html`
+                      <button class="btn btn-sm btn-danger" data-id="${item.id}" data-title="${f.Title||"Untitled"}" onclick="deleteFormRequest(this.dataset.id, this.dataset.title)">
+                        <svg width="12" height="12" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h9M5 3V2h3v1M4 3v7h5V3"/></svg>
+                        Delete
                       </button>
                     ` : "")}
                     ${safeHtml(adminActions.map(a => html`
@@ -254,6 +261,40 @@ function handleEditRequest(el) {
   if (isPreview) editPreviewFormRequest(id);
   else if (isCreated) doEditFormRequest(id); // Never been submitted — no warning needed
   else editFormRequest(id);
+}
+
+// =============================================================
+// DELETE FORM REQUEST (author, Created state only)
+// =============================================================
+function deleteFormRequest(itemId, title) {
+  openModal(html`
+    <div class="modal-header">
+      <span class="modal-title">Delete Form Request</span>
+      <button class="btn btn-ghost btn-icon btn-sm" onclick="closeModal()">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 1l12 12M13 1L1 13"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <p style="color:var(--text2);">Are you sure you want to delete <strong>${escHtml(title)}</strong>?</p>
+      <p style="color:var(--text2);margin-top:8px;">This will permanently remove the form request. Because it has not been approved or provisioned, no data or SharePoint list will be affected.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-danger" data-id="${itemId}" onclick="closeModal();doDeleteFormRequest(this.dataset.id)">Delete</button>
+    </div>
+  `);
+}
+
+async function doDeleteFormRequest(itemId) {
+  try {
+    const siteId = await getSiteId();
+    const listId = await getListId(CONFIG.FORMS_LIST);
+    await graphDelete(`/sites/${siteId}/lists/${listId}/items/${itemId}`);
+    showToast("success", "Form request deleted");
+    renderAdminReview(document.getElementById("admin-table"));
+  } catch (e) {
+    showToast("error", "Could not delete form request: " + e.message);
+  }
 }
 
 async function editPreviewFormRequest(itemId) {
