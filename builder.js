@@ -433,17 +433,35 @@ async function searchDataOwnerNow(queryOverride) {
   }
 }
 
+// Snapshot all governance DOM values into state before any re-render.
+// validateCurrentStep does this on Next — but mid-step re-renders (picker select/remove)
+// happen before Next is clicked, so we must capture first or the selects reset.
+function snapshotGovernanceDom() {
+  const g = AppState.builderForm.governance;
+  const r = (id) => document.getElementById(id)?.value;
+  const t = (id) => document.getElementById(id)?.value?.trim() || "";
+  if (r("gov-existing-process")        !== undefined) g.existingProcess       = r("gov-existing-process");
+  if (r("gov-existing-process-detail") !== undefined) g.existingProcessDetail = t("gov-existing-process-detail");
+  if (r("gov-retention")               !== undefined) g.retention             = r("gov-retention");
+  if (r("gov-sensitive-data")          !== undefined) g.sensitiveData         = r("gov-sensitive-data");
+  if (r("gov-privacy-assessment")      !== undefined) g.privacyAssessment     = r("gov-privacy-assessment");
+  if (r("gov-external-access")         !== undefined) g.externalAccess        = r("gov-external-access");
+  if (r("gov-continuity-plan")         !== undefined) g.continuityPlan        = t("gov-continuity-plan");
+  if (r("gov-expected-volume")         !== undefined) g.expectedVolume        = r("gov-expected-volume");
+}
+
 function setDataOwnerFromEl(el) {
+  snapshotGovernanceDom();
   AppState.builderForm.governance.dataOwner = {
     id:          el.dataset.id,
     displayName: el.dataset.name,
     email:       el.dataset.email,
   };
-  // Re-render just the governance step so the chip appears and the search disappears
   renderStepGovernance(document.getElementById("wizard-step-content"));
 }
 
 function removeDataOwner() {
+  snapshotGovernanceDom();
   AppState.builderForm.governance.dataOwner = null;
   renderStepGovernance(document.getElementById("wizard-step-content"));
 }
