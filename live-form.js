@@ -263,20 +263,83 @@ function renderLiveFormUI(container, formMeta, def, liveFormItemId, prefillValue
 
   function renderCurrentStep() {
     const stepSections = steps[currentStep] || [];
-    const allFields = getAllFieldsFromDef(def);
 
     return stepSections.map(sec => {
       const visibleFields = sec.fields.filter(field => {
+        // System fields that are purely read-only (Completed, CompletedDate, CompletedBy)
+        // are never rendered as form inputs — they are displayed via the completion panel.
+        // DeptEmail (systemRole "DeptEmail") IS rendered as a normal editable text input.
+        if (field.system && field.systemRole !== "DeptEmail") return false;
+
         // Check conditions — find ALL conditions that target this field (show when ALL pass)
         const conds = def.conditions?.filter(c => c.showFieldId === field.id) || [];
         if (!conds.length) return true;
         return conds.every(cond => evaluateCondition(cond, formValues));
       });
 
+      // For managerOnly sections, check completion state from prefillValues (SP item fields).
+      // prefillValues uses SP internal column names as keys.
+      let completionPanel = "";
+      if (sec.managerOnly && isManager) {
+        const key = sectionKey(sec);
+        const completedColName  = `${key}_Completed`;
+        const dateColName       = `${key}_CompletedDate`;
+        const byColName         = `${key}_CompletedBy`;
+
+        // Read completion state from the raw SP prefill values — not formValues —
+        // because these are system-managed fields never entered via the form UI.
+        const isCompleted  = prefillValues?.[completedColName] === true;
+        const completedBy  = prefillValues?.[byColName] || "";
+        const completedRaw = prefillValues?.[dateColName] || "";
+        const completedDate = completedRaw
+          ? new Date(completedRaw).toLocaleString("en-GB", {
+              day: "2-digit", month: "short", year: "numeric",
+              hour: "2-digit", minute: "2-digit"
+            })
+          : "";
+
+        // Read the stored comment from formValues — it's stored in a Comment field
+        // we write alongside the completion fields.
+        const commentColName = `${key}_CompletedComment`;
+        const completedComment = prefillValues?.[commentColName] || "";
+
+        if (isCompleted) {
+          // Show the completion info panel — no Complete button
+          completionPanel = `
+            <div style="margin:16px 0 8px;padding:14px 16px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);border-radius:8px;display:flex;gap:12px;align-items:flex-start;">
+              <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="rgba(34,197,94,0.9)" stroke-width="1.5" style="flex-shrink:0;margin-top:1px;"><path d="M13 4L6 11 3 8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <div style="font-size:13px;color:var(--text);">
+                <div style="font-weight:600;margin-bottom:3px;">Completed by ${escHtml(completedBy)}${completedDate ? ` on ${escHtml(completedDate)}` : ""}</div>
+                ${completedComment ? `<div style="color:var(--text2);font-style:italic;">"${escHtml(completedComment)}"</div>` : ""}
+              </div>
+            </div>
+          `;
+        } else if (editItemId) {
+          // Only show the Complete button when viewing an existing submission (editItemId exists).
+          // On a fresh unsaved submission there is no SP item ID to update yet.
+          const deptEmailField = sec.fields.find(f => f.system && f.systemRole === "DeptEmail");
+          const deptEmailColName = deptEmailField?.internalName || `${key}_DeptEmail`;
+          completionPanel = `
+            <div style="margin:16px 0 8px;padding:12px 16px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;display:flex;justify-content:flex-end;">
+              <button class="btn btn-primary btn-sm"
+                data-secid="${escAttr(sec.id)}"
+                data-key="${escAttr(key)}"
+                data-listname="${escAttr(def.listName || formMeta[CONFIG.COL_LISTNAME] || "")}"
+                data-itemid="${escAttr(editItemId)}"
+                data-deptemailcol="${escAttr(deptEmailColName)}"
+                onclick="openSectionCompleteModal(this.dataset.secid, this.dataset.key, this.dataset.listname, this.dataset.itemid, this.dataset.deptemailcol)">
+                ✓ Mark Section Complete
+              </button>
+            </div>
+          `;
+        }
+      }
+
       return `
         <div class="preview-section">
           ${sec.title ? `<div class="preview-section-title">${escHtml(sec.title)}</div>` : ""}
           ${visibleFields.map(field => renderLiveField(field, formValues, def)).join("")}
+          ${completionPanel}
         </div>
       `;
     }).join("");
@@ -1027,5 +1090,177 @@ async function submitLiveForm(liveFormItemId, listName, editItemId) {
     hideProgress();
     showToast("error", `${isEdit ? "Save" : "Submit"} failed: ` + e.message);
     if (btn) { btn.disabled = false; btn.innerHTML = isEdit ? "Save Changes" : "Submit"; }
+  }
+}
+
+// =============================================================
+// SECTION COMPLETE BUTTON
+// Shown on managerOnly sections when viewing an existing submission.
+// Clicking it opens a modal for the Form Manager to enter a comment,
+// then writes the completion fields to SharePoint and fires sendMail
+// to the comma-separated addresses in the section's DeptEmail column.
+// =============================================================
+
+function openSectionCompleteModal(secId, key, listName, itemId, deptEmailColName) {
+  openModal(html`
+    <div class="modal-header">
+      <span class="modal-title">Mark Section Complete</span>
+      <button class="btn btn-ghost btn-icon btn-sm" onclick="closeModal()">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 1l12 12M13 1L1 13"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <p style="color:var(--text2);font-size:13.5px;margin-bottom:16px;">
+        This will mark this section as complete and notify the relevant team.
+        This action cannot be undone.
+      </p>
+      <div class="form-group">
+        <label for="section-complete-comment" style="font-weight:600;">Comment</label>
+        <textarea id="section-complete-comment" class="textarea" style="min-height:90px;"
+          placeholder="e.g. Work completed — ready for Dept B review"></textarea>
+        <span class="input-hint">This comment will be included in the notification email.</span>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary"
+        data-secid="${secId}"
+        data-key="${key}"
+        data-listname="${listName}"
+        data-itemid="${itemId}"
+        data-deptemailcol="${deptEmailColName}"
+        onclick="doSectionComplete(this)">
+        Confirm Complete
+      </button>
+    </div>
+  `);
+}
+
+async function doSectionComplete(btn) {
+  const secId         = btn.dataset.secid;
+  const key           = btn.dataset.key;
+  const listName      = btn.dataset.listname;
+  const itemId        = btn.dataset.itemid;
+  const deptEmailCol  = btn.dataset.deptemailcol;
+  const comment       = document.getElementById("section-complete-comment")?.value?.trim() || "";
+
+  closeModal();
+
+  // Resolve the section from the current form definition
+  const state = window._liveFormState;
+  if (!state) { showToast("error", "Form state lost — please reload"); return; }
+
+  const def      = state.def;
+  const formMeta = state.formMeta;
+  const section  = (def.sections || []).find(s => s.id === secId);
+  if (!section) { showToast("error", "Section not found"); return; }
+
+  showProgress("Completing section", "Saving completion status…");
+
+  try {
+    const now         = new Date().toISOString();
+    const displayName = AppState.currentUser?.displayName || AppState.currentUser?.email || "Unknown";
+
+    // Build the fields to write — 4 system columns + the comment column
+    const completionFields = {
+      [`${key}_Completed`]:        true,
+      [`${key}_CompletedDate`]:    now,
+      [`${key}_CompletedBy`]:      displayName,
+      [`${key}_CompletedComment`]: comment,
+    };
+
+    await updateListItem(listName, itemId, completionFields);
+
+    // ── Fire notification email ──────────────────────────────────
+    // Read the DeptEmail value from the current SP item.
+    // We use the prefillValues already loaded — or re-fetch if needed.
+    updateProgress("Sending notification…");
+
+    // Get the DeptEmail value from the saved item
+    const siteId    = await getSiteId();
+    const dataListId = await getListId(listName);
+    const spItem    = await graphGet(
+      `/sites/${siteId}/lists/${dataListId}/items/${itemId}?expand=fields`
+    );
+    const deptEmailRaw = spItem?.fields?.[deptEmailCol] || "";
+
+    // Parse comma-separated emails — trim each, filter empty strings
+    const recipients = deptEmailRaw
+      .split(",")
+      .map(e => e.trim())
+      .filter(e => e.includes("@"));
+
+    if (recipients.length) {
+      // Build the deep links
+      const appUrl      = (CONFIG.APP_URL || "").replace(/\/$/, "");
+      const formId      = state.liveFormItemId;
+      const openThisUrl = `${appUrl}?view=my-forms&formId=${encodeURIComponent(formId)}&itemId=${encodeURIComponent(itemId)}`;
+      const openAllUrl  = `${appUrl}?view=my-forms&formId=${encodeURIComponent(formId)}`;
+
+      const formTitle    = escHtml(formMeta.Title || def.title || "Form");
+      const sectionTitle = escHtml(section.title || key);
+
+      // HTML email body
+      const emailBody = `
+        <div style="font-family:sans-serif;font-size:14px;color:#1a1a1a;max-width:600px;">
+          <h2 style="font-size:18px;font-weight:600;margin-bottom:8px;">
+            ${formTitle} — ${sectionTitle} Completed
+          </h2>
+          <p style="color:#555;margin-bottom:16px;">
+            <strong>${escHtml(displayName)}</strong> has marked the
+            <strong>${sectionTitle}</strong> section as complete.
+          </p>
+          ${comment ? `
+          <div style="background:#f4f4f2;border-left:3px solid #888;padding:12px 16px;border-radius:4px;margin-bottom:20px;">
+            <p style="margin:0;color:#333;font-style:italic;">"${escHtml(comment)}"</p>
+          </div>` : ""}
+          <div style="margin-bottom:8px;">
+            <strong>Completed by:</strong> ${escHtml(displayName)}<br>
+            <strong>Date:</strong> ${new Date(now).toLocaleString("en-GB", {
+              day: "2-digit", month: "short", year: "numeric",
+              hour: "2-digit", minute: "2-digit"
+            })}
+          </div>
+          <div style="margin-top:24px;display:flex;gap:12px;">
+            <a href="${openThisUrl}"
+              style="display:inline-block;padding:10px 20px;background:#002147;color:#fff;text-decoration:none;border-radius:5px;font-weight:600;">
+              Open This Form
+            </a>
+            <a href="${openAllUrl}"
+              style="display:inline-block;padding:10px 20px;background:#f4f4f2;color:#002147;text-decoration:none;border-radius:5px;font-weight:600;border:1px solid #ddd;">
+              Open All Forms
+            </a>
+          </div>
+          <p style="margin-top:24px;font-size:12px;color:#aaa;">
+            Sent by Form Studio on behalf of ${escHtml(displayName)}
+          </p>
+        </div>
+      `;
+
+      // Send via Graph /me/sendMail — fires as the logged-in user
+      await graphPost(`/me/sendMail`, {
+        message: {
+          subject: `[Form Studio] ${formMeta.Title || def.title || "Form"} — ${section.title || key} Completed`,
+          body: {
+            contentType: "HTML",
+            content: emailBody,
+          },
+          toRecipients: recipients.map(email => ({
+            emailAddress: { address: email }
+          })),
+        },
+        saveToSentItems: false,
+      });
+    }
+
+    hideProgress();
+    showToast("success", "Section marked complete" + (recipients.length ? " — notification sent" : ""));
+
+    // Reload the form to show the completion panel instead of the button
+    openLiveForm(state.liveFormItemId, itemId);
+
+  } catch (e) {
+    hideProgress();
+    showToast("error", "Could not complete section: " + e.message);
   }
 }

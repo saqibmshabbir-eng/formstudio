@@ -511,7 +511,7 @@ function renderSectionBlock(sec, si) {
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:${sec.managerOnly ? "var(--accent)" : "var(--text3)"};cursor:pointer;white-space:nowrap;" title="When enabled, submitters cannot see this section — only form managers and admins can view and fill it">
           <input type="checkbox" class="toggle" style="width:14px;height:14px;" data-si="${si}"
             ${sec.managerOnly ? "checked" : ""}
-            onchange="AppState.builderForm.sections[+this.dataset.si].managerOnly=this.checked;renderStepSections(document.getElementById('wizard-step-content'))">
+            onchange="toggleManagerOnly(+this.dataset.si, this.checked)">
           Managers only
         </label>
         <button class="btn btn-ghost btn-sm btn-icon" data-si="${si}" onclick="removeSection(+this.dataset.si)" aria-label="Remove section">
@@ -542,6 +542,29 @@ function renderFieldItem(field, si, fi) {
   const displayLabel = field.type === "InfoText"
     ? `ℹ ${(field.infoContent || "").replace(/<[^>]*>/g, "").slice(0, 50) || "Info block"}`
     : (field.label || "Untitled Field");
+
+  // System fields (injected by toggleManagerOnly) are protected —
+  // they cannot be edited or deleted by the form author.
+  if (field.system) {
+    return html`
+      <div class="field-item" style="opacity:0.7;background:var(--bg3);">
+        <span class="field-drag-handle" style="cursor:default;opacity:0.3;">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h8M3 7h8M3 10h8"/></svg>
+        </span>
+        <span class="field-type-badge" style="background:var(--bg2);color:var(--text3);">${typeLabel}</span>
+        <div class="field-info">
+          <div class="field-label" style="color:var(--text2);">${displayLabel}</div>
+          <div class="field-meta"><span style="color:var(--text3);font-size:11px;">System field — auto-managed</span></div>
+        </div>
+        <div class="field-actions">
+          <span title="System field — cannot be edited or deleted" style="color:var(--text3);padding:4px;">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M11 7V5a3 3 0 10-6 0v2H3v8h10V7h-2zm-4-2a1 1 0 112 0v2H7V5zm1 6.5a1 1 0 110-2 1 1 0 010 2z"/></svg>
+          </span>
+        </div>
+      </div>
+    `;
+  }
+
   return html`
     <div class="field-item">
       <span class="field-drag-handle">
@@ -579,12 +602,98 @@ function addSection() {
   renderStepSections(document.getElementById("wizard-step-content"));
 }
 
+// =============================================================
+// MANAGER SECTION SYSTEM FIELDS
+// When a section is toggled to managerOnly, four protected system
+// fields are automatically appended to it. They are marked
+// system:true so renderFieldItem shows them as locked.
+//
+// Column names are derived via sectionKey() so they are unique
+// per section and SharePoint-safe:
+//   {key}_DeptEmail      — Text    — comma-separated notification emails
+//   {key}_Completed      — Boolean — has this section been completed?
+//   {key}_CompletedDate  — DateTime — when it was completed
+//   {key}_CompletedBy    — Text    — display name of the completing user
+//
+// These are NOT in CONFIG.FIELD_TYPES (not user-selectable).
+// They are provisioned separately in admin.js doCreateSharePointList.
+// =============================================================
+function buildSystemFields(section) {
+  const key = sectionKey(section);
+  return [
+    {
+      id:           `${section.id}_deptEmail`,
+      label:        "Dept Notification Emails",
+      type:         "Text",
+      description:  "Comma-separated email addresses notified when this section is completed",
+      required:     false,
+      choices:      [],
+      system:       true,
+      systemRole:   "DeptEmail",
+      internalName: `${key}_DeptEmail`,
+    },
+    {
+      id:           `${section.id}_completed`,
+      label:        "Completed",
+      type:         "Boolean",
+      description:  "Set automatically when the Complete button is clicked",
+      required:     false,
+      choices:      [],
+      system:       true,
+      systemRole:   "Completed",
+      internalName: `${key}_Completed`,
+    },
+    {
+      id:           `${section.id}_completedDate`,
+      label:        "Completed Date",
+      type:         "DateTime",
+      description:  "Set automatically when the Complete button is clicked",
+      required:     false,
+      choices:      [],
+      system:       true,
+      systemRole:   "CompletedDate",
+      internalName: `${key}_CompletedDate`,
+    },
+    {
+      id:           `${section.id}_completedBy`,
+      label:        "Completed By",
+      type:         "Text",
+      description:  "Display name of the user who clicked Complete",
+      required:     false,
+      choices:      [],
+      system:       true,
+      systemRole:   "CompletedBy",
+      internalName: `${key}_CompletedBy`,
+    },
+  ];
+}
+
+function toggleManagerOnly(si, checked) {
+  const section = AppState.builderForm.sections[si];
+  section.managerOnly = checked;
+
+  if (checked) {
+    // Remove any stale system fields first (idempotent — safe to call twice)
+    section.fields = section.fields.filter(f => !f.system);
+    // Append the 4 system fields at the end of the section's field list
+    const systemFields = buildSystemFields(section);
+    section.fields.push(...systemFields);
+  } else {
+    // Strip system fields when manager-only is turned off
+    section.fields = section.fields.filter(f => !f.system);
+  }
+
+  renderStepSections(document.getElementById("wizard-step-content"));
+}
+
 function removeSection(si) {
   AppState.builderForm.sections.splice(si, 1);
   renderStepSections(document.getElementById("wizard-step-content"));
 }
 
 function removeField(si, fi) {
+  const field = AppState.builderForm.sections[si]?.fields[fi];
+  if (field?.system) return; // system fields cannot be removed manually
   AppState.builderForm.sections[si].fields.splice(fi, 1);
   renderStepSections(document.getElementById("wizard-step-content"));
 }

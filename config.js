@@ -60,12 +60,17 @@ const CONFIG = {
 
   // Set to true to enable verbose Graph API error logging in the browser console
   DEBUG_LOGGING: true,
+  // Base URL of this app — used to construct deep links in notification emails.
+  // Must match the URL users access the app from. No trailing slash.
+  APP_URL: "https://uniofleicester.sharepoint.com/sites/rooms2/FormStudio",
+
   SCOPES: [
     "Sites.ReadWrite.All",
     "Sites.Manage.All",
     "Files.ReadWrite.All",
     "User.Read",
     "People.Read",
+    "Mail.Send",   // Required for section Complete button — sends notification email as the logged-in user
   ],
 
   // Supported field types for the form builder

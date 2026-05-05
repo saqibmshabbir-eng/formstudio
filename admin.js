@@ -699,6 +699,56 @@ async function doCreateSharePointList(listName, def, access, authorEmail = null)
     console.warn("AssignedTo column failed:", e.message);
   }
 
+  // ── System columns for Form Manager (managerOnly) sections ──────────────
+  // For every managerOnly section we provision 4 protected columns:
+  //   {key}_DeptEmail      Text     — comma-separated notification emails
+  //   {key}_Completed      Boolean  — has this section been completed?
+  //   {key}_CompletedDate  DateTime — when it was completed
+  //   {key}_CompletedBy    Text     — display name of the completing user
+  //
+  // The key is derived from sectionKey() — first 20 alphanumeric chars of
+  // the section title, with a numeric suffix if two sections clash.
+  // We use the same sectionKey() function defined in utils.js.
+  const managerSections = (def.sections || []).filter(s => s.managerOnly);
+  for (const sec of managerSections) {
+    const key = sectionKey(sec);
+    const systemCols = [
+      {
+        name:        `${key}_DeptEmail`,
+        displayName: `${sec.title || key} — Dept Emails`,
+        text:        {},
+      },
+      {
+        name:        `${key}_Completed`,
+        displayName: `${sec.title || key} — Completed`,
+        boolean:     {},
+      },
+      {
+        name:        `${key}_CompletedDate`,
+        displayName: `${sec.title || key} — Completed Date`,
+        dateTime:    { displayAs: "default", format: "dateTime" },
+      },
+      {
+        name:        `${key}_CompletedBy`,
+        displayName: `${sec.title || key} — Completed By`,
+        text:        {},
+      },
+      {
+        name:        `${key}_CompletedComment`,
+        displayName: `${sec.title || key} — Completed Comment`,
+        text:        { allowMultipleLines: true, linesForEditing: 3 },
+      },
+    ];
+    for (const colDef of systemCols) {
+      try {
+        await graphPost(`/sites/${siteId}/lists/${newListId}/columns`, colDef);
+        if (CONFIG.DEBUG_LOGGING) console.log(`[SystemCols] Created "${colDef.name}"`);
+      } catch (e) {
+        console.warn(`[SystemCols] "${colDef.name}" failed:`, e.message);
+      }
+    }
+  }
+
   if (nameClashes.length) {
     console.info(`[Columns] ${nameClashes.length} field name(s) auto-renamed: ${nameClashes.join(", ")}`);
   }
