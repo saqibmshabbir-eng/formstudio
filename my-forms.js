@@ -18,71 +18,52 @@ async function renderMyForms(container) {
 
   try {
     const currentEmail = (AppState.currentUser?.email || "").toLowerCase();
-    const allItems = await getListItems(CONFIG.FORMS_LIST);
+    const allItems     = await getListItems(CONFIG.FORMS_LIST);
 
-    // Retro forms — shown to all users, no definition needed, click opens ViewUrl
-    const retroForms = allItems
-      .filter(i => i.fields?.[CONFIG.COL_RETRO] && i.fields?.[CONFIG.COL_VIEW_URL])
-      .map(item => ({ item, def: null, role: "retro" }));
+    // Candidate forms — Live or Preview, plus retro forms that have a ListName.
+    // Retro forms are included on the same basis as regular forms — we query
+    // their data list and only show the pill if it has items.
+    const candidates = allItems.filter(i => {
+      const s        = i.fields?.[CONFIG.COL_STATUS] || "";
+      const listName = i.fields?.[CONFIG.COL_LISTNAME] || "";
+      const isRetro  = !!i.fields?.[CONFIG.COL_RETRO];
 
-    // Show forms where user is the author AND the form is Live or Preview
-    // (only deployed forms have a data list to browse submissions on)
-    // Exclude retro items from standard flow
-    const myForms = allItems.filter(i => {
-      const s = i.fields?.[CONFIG.COL_STATUS] || "";
-      if (i.fields?.[CONFIG.COL_RETRO]) return false;
-      if (s !== "Live" && s !== "Preview") return false;
-      const createdByEmail = (i.createdBy?.user?.email || "").toLowerCase();
-      return createdByEmail === currentEmail;
+      if (isRetro) return !!listName; // retro: needs a list name to query
+      return (s === "Live" || s === "Preview") && !!listName;
     });
 
-    // Also load definitions in parallel to find forms where user is a Form Manager
-    const defsResults = await Promise.allSettled(myForms.map(i =>
-      getFormDefinition(CONFIG.FORMS_LIST, i.id)
-    ));
+    // For each candidate, fire a $top=1 query against its data list.
+    // SharePoint's ReadSecurity=2 means each user sees only their own items —
+    // no client-side filter needed. Admins and managers see all items.
+    // We filter out soft-deleted items so an all-deleted list shows no pill.
+    const siteId = await getSiteId();
 
-    // Check all Live/Preview forms for manager membership (exclude retro)
-    const otherItems = allItems.filter(i => {
-      const s = i.fields?.[CONFIG.COL_STATUS] || "";
-      if (i.fields?.[CONFIG.COL_RETRO]) return false;
-      if (s !== "Live" && s !== "Preview") return false;
-      const createdByEmail = (i.createdBy?.user?.email || "").toLowerCase();
-      return createdByEmail !== currentEmail; // not already captured as author
-    });
+    const hasItemsResults = await Promise.allSettled(
+      candidates.map(async item => {
+        const listName = item.fields[CONFIG.COL_LISTNAME];
+        try {
+          const listId   = await getListId(listName);
+          const response = await graphGet(
+            `/sites/${siteId}/lists/${listId}/items` +
+            `?expand=fields($select=IsDeleted)` +
+            `&$filter=fields/IsDeleted ne true` +
+            `&$top=1`
+          );
+          return (response?.value?.length || 0) > 0;
+        } catch (_) {
+          // List doesn't exist or user has no access — treat as no items
+          return false;
+        }
+      })
+    );
 
-    const otherDefs = await Promise.allSettled(otherItems.map(i =>
-      getFormDefinition(CONFIG.FORMS_LIST, i.id)
-    ));
+    // Keep only candidates whose list returned at least one item
+    const formsWithItems = candidates.filter((_, idx) =>
+      hasItemsResults[idx].status === "fulfilled" && hasItemsResults[idx].value === true
+    );
 
-    // Collect manager forms
-    const managedForms = otherItems.filter((item, idx) => {
-      const def = otherDefs[idx].status === "fulfilled" ? otherDefs[idx].value : null;
-      if (!def?.formManagers) return false;
-      return def.formManagers.some(m => (m.email || "").toLowerCase() === currentEmail);
-    });
-
-    const managedDefs = otherDefs
-      .filter((r, idx) => managedForms.includes(otherItems[idx]))
-      .map(r => r.status === "fulfilled" ? r.value : null);
-
-    // Build combined list with their definitions
-    const authorForms = myForms.map((item, idx) => ({
-      item,
-      def: defsResults[idx].status === "fulfilled" ? defsResults[idx].value : null,
-      role: "author",
-    }));
-
-    const managerForms = managedForms.map((item, idx) => ({
-      item,
-      def: managedDefs[idx],
-      role: "manager",
-    }));
-
-    const allForms = [...retroForms, ...authorForms, ...managerForms];
-
-    const listEl = document.getElementById("my-forms-list");
-    if (!allForms.length) {
-      listEl.innerHTML = html`
+    if (!formsWithItems.length) {
+      document.getElementById("my-forms-list").innerHTML = html`
         <div class="empty-state">
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 12h6M9 16h6M9 8h6M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z"/></svg>
           <h3 style="margin-top:12px;">No forms yet</h3>
@@ -92,35 +73,61 @@ async function renderMyForms(container) {
       return;
     }
 
-    listEl.innerHTML = html`
+    // Load definitions in parallel for the forms that passed — needed only
+    // for the role badge (Author / Manager). Failures are non-fatal.
+    const defResults = await Promise.allSettled(
+      formsWithItems.map(i => getFormDefinition(CONFIG.FORMS_LIST, i.id))
+    );
+
+    // Derive role badge per form — Author > Manager > none (submitter)
+    function roleFor(item, def) {
+      const createdByEmail = (item.createdBy?.user?.email || "").toLowerCase();
+      if (createdByEmail === currentEmail) return "author";
+      if (def?.formManagers?.some(m => (m.email || "").toLowerCase() === currentEmail)) return "manager";
+      return null;
+    }
+
+    document.getElementById("my-forms-list").innerHTML = html`
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">
-        ${safeHtml(allForms.map(({ item, def, role }) => {
-          const f = item.fields || {};
+        ${safeHtml(formsWithItems.map((item, idx) => {
+          const f       = item.fields || {};
           const isRetro = !!f[CONFIG.COL_RETRO];
-          const status = f[CONFIG.COL_STATUS] || "Live";
+          const status  = f[CONFIG.COL_STATUS] || "Live";
+          const def     = defResults[idx].status === "fulfilled" ? defResults[idx].value : null;
+          const role    = roleFor(item, def);
+
           const onclick = isRetro
-            ? `window.open(${JSON.stringify(f[CONFIG.COL_VIEW_URL])},'_blank')`
+            ? `window.open(${JSON.stringify(f[CONFIG.COL_VIEW_URL] || "")},'_blank')`
             : `openFormSubmissions(this.dataset.id)`;
+
           return html`
             <div class="card" style="cursor:pointer;transition:var(--transition);"
               data-id="${item.id}" onclick="${onclick}"
-              onmouseover="this.style.borderColor='var(--border2)'" onmouseout="this.style.borderColor='var(--border)'">
+              onmouseover="this.style.borderColor='var(--border2)'"
+              onmouseout="this.style.borderColor='var(--border)'">
               <div class="card-body" style="padding:20px;">
-                <div class="flex items-center gap-2 mb-3">
+                <div class="flex items-center gap-2 mb-3" style="flex-wrap:wrap;">
                   ${safeHtml(isRetro
                     ? `<span class="badge badge-purple" style="font-size:10px;">SharePoint</span>`
                     : statusBadge(status)
                   )}
-                  ${safeHtml(!isRetro ? `<span class="badge badge-${role === "author" ? "blue" : "purple"}" style="font-size:10px;">
-                    ${role === "author" ? "Author" : "Manager"}
-                  </span>` : "")}
+                  ${safeHtml(role === "author"
+                    ? `<span class="badge badge-blue" style="font-size:10px;">Author</span>`
+                    : role === "manager"
+                      ? `<span class="badge badge-purple" style="font-size:10px;">Manager</span>`
+                      : ""
+                  )}
                 </div>
-                <div style="font-size:16px;font-weight:600;margin-bottom:4px;">${f.Title||"Untitled"}</div>
-                <div style="font-size:12px;color:var(--text3);font-family:var(--mono);margin-bottom:12px;">${isRetro ? "External SharePoint list" : (f[CONFIG.COL_LISTNAME]||"")}</div>
-                ${safeHtml(isRetro ? `<div style="font-size:12px;color:var(--text3);display:flex;align-items:center;gap:4px;">
-                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 3H3a1 1 0 00-1 1v9a1 1 0 001 1h9a1 1 0 001-1V9M9 1h6m0 0v6m0-6L7 9"/></svg>
-                  Opens in SharePoint
-                </div>` : "")}
+                <div style="font-size:16px;font-weight:600;margin-bottom:4px;">${f.Title || "Untitled"}</div>
+                <div style="font-size:12px;color:var(--text3);font-family:var(--mono);margin-bottom:12px;">
+                  ${isRetro ? "External SharePoint list" : (f[CONFIG.COL_LISTNAME] || "")}
+                </div>
+                ${safeHtml(isRetro ? `
+                  <div style="font-size:12px;color:var(--text3);display:flex;align-items:center;gap:4px;">
+                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 3H3a1 1 0 00-1 1v9a1 1 0 001 1h9a1 1 0 001-1V9M9 1h6m0 0v6m0-6L7 9"/></svg>
+                    Opens in SharePoint
+                  </div>` : ""
+                )}
               </div>
             </div>
           `;
