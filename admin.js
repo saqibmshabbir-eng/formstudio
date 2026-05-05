@@ -685,6 +685,20 @@ async function doCreateSharePointList(listName, def, access, authorEmail = null)
     console.warn("IsDeleted column failed:", e.message);
   }
 
+  // Add AssignedTo person column for the soft check-out / claim feature.
+  // Single-select, optional. Added by the provisioner so end-users cannot
+  // remove or duplicate it via the builder. Form Managers and Admins read
+  // and write this from the submissions table to coordinate edits.
+  try {
+    await graphPost(`/sites/${siteId}/lists/${newListId}/columns`, {
+      name: CONFIG.COL_ASSIGNED_TO,
+      displayName: "Assigned To",
+      personOrGroup: { allowMultipleSelection: false },
+    });
+  } catch (e) {
+    console.warn("AssignedTo column failed:", e.message);
+  }
+
   if (nameClashes.length) {
     console.info(`[Columns] ${nameClashes.length} field name(s) auto-renamed: ${nameClashes.join(", ")}`);
   }

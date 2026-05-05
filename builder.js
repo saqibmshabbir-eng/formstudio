@@ -202,6 +202,23 @@ function validateCurrentStep() {
     if (!g.externalAccess)     { showToast("error", "Please select an external access option"); return false; }
     if (!g.dataOwner)          { showToast("error", "Please select a data owner — e.g. your Dept Head"); return false; }
   }
+  if (step === "sections") {
+    // Block field labels that would clash with system-managed columns
+    // (AssignedTo, IsDeleted, Title, ID, Status). Sanitised, case-insensitive —
+    // "Assigned To", "assigned-to", "AssignedTo!" all collapse to "assignedto"
+    // because that's what would land in SharePoint as the internal name.
+    const reserved = (CONFIG.RESERVED_FIELD_NAMES || []).map(n => n.toLowerCase());
+    for (const section of (AppState.builderForm.sections || [])) {
+      for (const field of (section.fields || [])) {
+        if (field.type === "InfoText") continue; // display-only, no SP column created
+        const sanitised = sanitiseColumnName(field.internalName || field.label).toLowerCase();
+        if (reserved.includes(sanitised)) {
+          showToast("error", `"${field.label}" is a reserved field name and cannot be used. Please rename it.`);
+          return false;
+        }
+      }
+    }
+  }
   return true;
 }
 // ---- Step 1: Identity ----

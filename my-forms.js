@@ -223,10 +223,12 @@ function renderSubmissionsTable(container) {
   let filtered = _subFilter
     ? _submissions.filter(item => {
         const f = item.fields || {};
+        const assignedName = String(f[CONFIG.COL_ASSIGNED_TO]?.LookupValue || "").toLowerCase();
         return allFields.some(field => {
           const val = String(f[field.internalName || field.label] || "").toLowerCase();
           return val.includes(filterLower);
-        }) || formatDate(f.Modified).toLowerCase().includes(filterLower);
+        }) || formatDate(f.Modified).toLowerCase().includes(filterLower)
+          || assignedName.includes(filterLower);
       })
     : [..._submissions];
 
@@ -237,6 +239,13 @@ function renderSubmissionsTable(container) {
       av = a.fields?.Modified || ""; bv = b.fields?.Modified || "";
     } else if (_subSortCol === "Created") {
       av = a.fields?.Created || ""; bv = b.fields?.Created || "";
+    } else if (_subSortCol === "AssignedTo") {
+      // Person column — sort alphabetically by display name; unassigned rows last
+      av = a.fields?.[CONFIG.COL_ASSIGNED_TO]?.LookupValue || "";
+      bv = b.fields?.[CONFIG.COL_ASSIGNED_TO]?.LookupValue || "";
+      // Push empty values to the end regardless of asc/desc
+      if (!av && bv) return 1;
+      if (av && !bv) return -1;
     } else {
       const field = allFields.find(f => f.label === _subSortCol);
       if (field) {
@@ -296,6 +305,9 @@ function renderSubmissionsTable(container) {
         <table>
           <thead>
             <tr>
+              <th style="cursor:pointer;width:140px;" onclick="_subSortCol='AssignedTo';_subSortAsc=(_subSortCol==='AssignedTo'&&!_subSortAsc);renderSubmissionsTable(document.getElementById('main-content'))">
+                Assigned To${arrow("AssignedTo")}
+              </th>
               ${safeHtml(visibleFields.map(f => html`
                 <th style="cursor:pointer;" data-col="${f.label}" onclick="_subSortCol=this.dataset.col;_subSortAsc=(_subSortCol===this.dataset.col&&!_subSortAsc);renderSubmissionsTable(document.getElementById('main-content'))">
                   ${f.label}${arrow(f.label)}
@@ -305,17 +317,27 @@ function renderSubmissionsTable(container) {
                 Submitted${arrow("Modified")}
               </th>
               ${safeHtml(hasFileUpload ? `<th style="width:40px;text-align:center;" title="Attachments"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13.5 8.5l-5.5 5.5a4 4 0 01-5.66-5.66l6-6a2.5 2.5 0 013.54 3.54l-6.01 6a1 1 0 01-1.41-1.41l5.5-5.5"/></svg></th>` : "")}
-              <th style="width:120px;">Actions</th>
+              <th style="width:160px;">Actions</th>
             </tr>
           </thead>
           <tbody>
             ${safeHtml(!rows.length
-              ? `<tr><td colspan="${visibleFields.length + (hasFileUpload ? 3 : 2)}" style="text-align:center;color:var(--text3);padding:32px;">No submissions found</td></tr>`
+              ? `<tr><td colspan="${visibleFields.length + (hasFileUpload ? 4 : 3)}" style="text-align:center;color:var(--text3);padding:32px;">No submissions found</td></tr>`
               : rows.map(item => {
                   const f = item.fields || {};
                   const hasAttachment = f.Attachments === true || f.Attachments === 1 || item.hasAttachments === true;
+                  // Per-row assignment check — drives which action buttons are visible
+                  const assignedTo    = f[CONFIG.COL_ASSIGNED_TO];
+                  const assignedEmail = (assignedTo?.Email || "").toLowerCase();
+                  const assignedName  = assignedTo?.LookupValue || "";
+                  const isMine        = !!assignedEmail && assignedEmail === currentEmail;
+                  const isUnassigned  = !assignedTo;
+                  const assignTitle   = isUnassigned ? "Assign to me" : `Take from ${assignedName}`;
                   return html`<tr style="cursor:pointer;" data-id="${item.id}"
                     onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
+                    <td onclick="viewSubmission('${item.id}')" style="font-size:13px;color:var(--text2);">
+                      ${assignedName ? escHtml(assignedName) : `<span style="color:var(--text3);">—</span>`}
+                    </td>
                     ${safeHtml(visibleFields.map(field => html`
                       <td onclick="viewSubmission('${item.id}')">${formatFieldValue(f[field.internalName || field.label]).slice(0, 80)}</td>
                     `).join(""))}
@@ -330,12 +352,19 @@ function renderSubmissionsTable(container) {
                         <button class="btn btn-ghost btn-sm btn-icon" title="View" data-id="${item.id}" onclick="viewSubmission(this.dataset.id)">
                           <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="3"/><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/></svg>
                         </button>
-                        <button class="btn btn-ghost btn-sm btn-icon" title="Edit" data-id="${item.id}" data-listname="${_currentFormItem.fields?.[CONFIG.COL_LISTNAME]||""}" data-formid="${_currentFormItem.id}" onclick="editSubmission(this.dataset.id,this.dataset.listname,this.dataset.formid)">
-                          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9.5 1.5l2 2-8 8H1.5v-2l8-8z"/></svg>
-                        </button>
-                        <button class="btn btn-ghost btn-sm btn-icon" title="Delete" data-id="${item.id}" onclick="deleteSubmission(this.dataset.id)" style="color:var(--red)">
-                          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h9M5 3V2h3v1M4 3v7h5V3"/></svg>
-                        </button>
+                        ${safeHtml(isManager && isMine ? html`
+                          <button class="btn btn-ghost btn-sm btn-icon" title="Edit" data-id="${item.id}" data-listname="${_currentFormItem.fields?.[CONFIG.COL_LISTNAME]||""}" data-formid="${_currentFormItem.id}" onclick="editSubmission(this.dataset.id,this.dataset.listname,this.dataset.formid)">
+                            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9.5 1.5l2 2-8 8H1.5v-2l8-8z"/></svg>
+                          </button>
+                          <button class="btn btn-ghost btn-sm btn-icon" title="Delete" data-id="${item.id}" onclick="deleteSubmission(this.dataset.id)" style="color:var(--red)">
+                            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h9M5 3V2h3v1M4 3v7h5V3"/></svg>
+                          </button>
+                        ` : "")}
+                        ${safeHtml(isManager && !isMine ? html`
+                          <button class="btn btn-secondary btn-sm" title="${escHtml(assignTitle)}" data-id="${item.id}" onclick="assignSubmissionToMe(this.dataset.id)">
+                            Assign to me
+                          </button>
+                        ` : "")}
                       </div>
                     </td>
                   </tr>`;
@@ -374,6 +403,13 @@ function viewSubmission(submissionId) {
   const hasFileUpload = allFields.some(field => field.type === "FileUpload");
   const listName = _currentFormItem?.fields?.[CONFIG.COL_LISTNAME] || _currentFormDef?.listName || "";
 
+  // Edit button is only shown when the row is currently assigned to the
+  // signed-in user. Anyone else must claim the row via "Assign to me" on
+  // the table first — keeps the table the single entry-point for claims.
+  const currentEmail  = (AppState.currentUser?.email || "").toLowerCase();
+  const assignedEmail = (f[CONFIG.COL_ASSIGNED_TO]?.Email || "").toLowerCase();
+  const isMine        = !!assignedEmail && assignedEmail === currentEmail;
+
   openModal(html`
     <div class="modal-header">
       <span class="modal-title">Submission — ${formatDate(f.Modified)}</span>
@@ -403,12 +439,14 @@ function viewSubmission(submissionId) {
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal()">Close</button>
-      <button class="btn btn-secondary" data-id="${submissionId}"
-        data-listname="${listName}"
-        data-formid="${_currentFormItem.id}"
-        onclick="closeModal();editSubmission(this.dataset.id,this.dataset.listname,this.dataset.formid)">
-        Edit
-      </button>
+      ${safeHtml(isMine ? html`
+        <button class="btn btn-secondary" data-id="${submissionId}"
+          data-listname="${listName}"
+          data-formid="${_currentFormItem.id}"
+          onclick="closeModal();editSubmission(this.dataset.id,this.dataset.listname,this.dataset.formid)">
+          Edit
+        </button>
+      ` : "")}
     </div>
   `, false, true);
 
@@ -732,6 +770,68 @@ async function syncManagersToDefinition(formItemId, change) {
     console.warn("Could not sync managers to definition:", e.message);
   }
 }
+
+// =============================================================
+// ASSIGN TO ME — soft check-out for a single submission row
+// Writes the current user into AssignedTo, then re-fetches the row from
+// SharePoint to confirm who actually owns it after the write. If two users
+// click "Assign to me" within the same second, last-write-wins on the server;
+// the loser's re-fetch shows the winner so they don't think they own it.
+// =============================================================
+async function assignSubmissionToMe(submissionId) {
+  const listName = _currentFormItem?.fields?.[CONFIG.COL_LISTNAME] || _currentFormDef?.listName;
+  if (!listName) { showToast("error", "Cannot determine list name"); return; }
+
+  const email = AppState.currentUser?.email;
+  if (!email) { showToast("error", "Could not identify current user"); return; }
+
+  try {
+    // SP integer user ID is cached at boot in AppState._currentUserSpId.
+    // Fall back to resolveSpUserId for older sessions or if the boot fetch failed.
+    let spUserId = AppState._currentUserSpId;
+    if (!spUserId) spUserId = await resolveSpUserId(email);
+    if (!spUserId) throw new Error("Could not resolve current user to a SharePoint ID");
+
+    // Person columns are written via Graph as <ColumnName>LookupId with the integer ID.
+    // Same pattern as GovDataOwnerLookupId in builder.js.
+    await updateListItem(listName, submissionId, {
+      [`${CONFIG.COL_ASSIGNED_TO}LookupId`]: spUserId,
+    });
+
+    // Re-fetch this row from SP to get the *actual* current assignment, not just
+    // what we tried to write. This closes the simultaneous-click race: the loser's
+    // re-fetch reflects the winner and the UI re-renders without Edit/Delete buttons
+    // for them, with "Assign to me" still present so they can take it back if they want.
+    try {
+      const siteId = await getSiteId();
+      const listId = await getListId(listName);
+      const fresh  = await graphGet(`/sites/${siteId}/lists/${listId}/items/${submissionId}?expand=fields,createdBy`);
+      const idx    = _submissions.findIndex(i => i.id === submissionId);
+      if (idx !== -1 && fresh) _submissions[idx] = fresh;
+    } catch (e) {
+      console.warn("Could not refresh row after assign:", e.message);
+    }
+
+    // Tell the user whether they actually won, based on the refreshed row
+    const refreshed     = _submissions.find(i => i.id === submissionId);
+    const nowAssigned   = refreshed?.fields?.[CONFIG.COL_ASSIGNED_TO];
+    const nowEmail      = (nowAssigned?.Email || "").toLowerCase();
+    if (nowEmail === email.toLowerCase()) {
+      showToast("success", "Assigned to you");
+    } else if (nowAssigned) {
+      showToast("info", `Already assigned to ${nowAssigned.LookupValue || "another user"}`);
+    } else {
+      // Write succeeded according to SP but row came back unassigned — unusual,
+      // probably a transient read; surface as info rather than error
+      showToast("info", "Assignment did not stick — please try again");
+    }
+
+    renderSubmissionsTable(document.getElementById("main-content"));
+  } catch (e) {
+    showToast("error", "Could not assign: " + e.message);
+  }
+}
+
 function editSubmission(submissionId, listName, formItemId) {
   // Reuse the existing openLiveForm with editItemId so the live form
   // renders pre-populated with existing values and submits as an update
