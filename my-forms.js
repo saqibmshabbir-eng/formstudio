@@ -336,7 +336,7 @@ function renderSubmissionsTable(container) {
                   return html`<tr style="cursor:pointer;" data-id="${item.id}"
                     onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
                     <td onclick="viewSubmission('${item.id}')" style="font-size:13px;color:var(--text2);">
-                      ${assignedName ? escHtml(assignedName) : `<span style="color:var(--text3);">—</span>`}
+                      ${assignedName ? escHtml(assignedName) : safeHtml(`<span style="color:var(--text3);">—</span>`)}
                     </td>
                     ${safeHtml(visibleFields.map(field => html`
                       <td onclick="viewSubmission('${item.id}')">${formatFieldValue(f[field.internalName || field.label]).slice(0, 80)}</td>
