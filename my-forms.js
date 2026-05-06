@@ -652,48 +652,23 @@ async function loadCurrentManagers(formItemId) {
   }
 }
 
-let _managerAddSearchTimeout = null;
-function debouncedManagerAddSearch(val) {
-  clearTimeout(_managerAddSearchTimeout);
-  _managerAddSearchTimeout = setTimeout(() => searchManagerAdd(val), 400);
-}
-
-async function searchManagerAdd(queryOverride) {
-  const query = queryOverride !== undefined ? queryOverride : document.getElementById("manager-add-search")?.value;
-  if (!query || query.length < 2) return;
-  const resultsEl = document.getElementById("manager-add-results");
-  if (!resultsEl) return;
-  resultsEl.innerHTML = `<span class="spinner"></span>`;
-  try {
-    const people = await searchPeople(query);
-    if (!people.length) { resultsEl.innerHTML = `<p style="font-size:12.5px;color:var(--text3);">No results found.</p>`; return; }
-    resultsEl.innerHTML = html`
-      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;">
-        ${safeHtml(people.slice(0, 6).map(p => html`
-          <div class="flex items-center gap-2" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);"
-            data-id="${p.id}" data-name="${p.displayName}" data-email="${p.scoredEmailAddresses?.[0]?.address || ""}"
-            data-formid="${_currentFormItem?.id}"
-            onclick="addFormManagerFromEl(this)"
-            onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background=''">
-            <div class="avatar" style="width:24px;height:24px;font-size:10px;">${p.displayName.split(" ").map(n=>n[0]).join("").slice(0,2)}</div>
-            <div style="flex:1;">
-              <div style="font-size:13px;">${p.displayName}</div>
-              <div style="font-size:11.5px;color:var(--text3);">${p.scoredEmailAddresses?.[0]?.address || ""}</div>
-            </div>
-            <span style="font-size:11px;color:var(--accent);">Add</span>
-          </div>
-        `).join(""))}
-      </div>
-    `;
-  } catch (e) {
-    resultsEl.innerHTML = html`<p style="font-size:12.5px;color:var(--red);">Search failed: ${e.message}</p>`;
-  }
-}
+// Manager add search — uses the shared createPeopleSearch utility.
+// addFormManagerFromEl reads _currentFormItem directly so no extra
+// data-formid attribute is needed on the result rows.
+const _managerAddSearch = createPeopleSearch({
+  inputId:   "manager-add-search",
+  resultsId: "manager-add-results",
+  onClickFn: "addFormManagerFromEl",
+});
+function debouncedManagerAddSearch(val) { _managerAddSearch.debounced(val); }
+async function searchManagerAdd(q)      { await _managerAddSearch.search(q); }
 
 async function addFormManagerFromEl(el) {
   const email      = el.dataset.email;
   const name       = el.dataset.name;
-  const formItemId = el.dataset.formid;
+  // formItemId comes from _currentFormItem — not a data attribute — because
+  // createPeopleSearch no longer injects data-formid on result rows.
+  const formItemId = _currentFormItem?.id;
   const listName   = _currentFormItem?.fields?.[CONFIG.COL_LISTNAME] || _currentFormDef?.listName;
 
   el.style.opacity = "0.5";

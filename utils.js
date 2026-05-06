@@ -199,6 +199,87 @@ function loadTheme() {
 loadTheme();
 
 // =============================================================
+// GENERIC PEOPLE SEARCH
+// Replaces four near-identical debounced search implementations
+// across builder.js and my-forms.js.
+//
+// Usage:
+//   createPeopleSearch({
+//     inputId:    "managers-search",    // ID of the text input
+//     resultsId:  "managers-results",   // ID of the results container
+//     onClickFn:  "addManagerFromEl",   // global fn name called on row click
+//     extraData:  { formid: "123" },    // optional extra data-* attrs on each row
+//   })
+//
+// The caller still defines its own onClickFn (addManagerFromEl, addPersonFromEl etc.)
+// because the action on selection differs per context.
+// =============================================================
+const _peopleSearchTimers = {};
+
+function createPeopleSearch({ inputId, resultsId, onClickFn, extraData = {} }) {
+  // Returns { search, debounced } so the caller can wire up oninput and button onclick
+  async function search(queryOverride) {
+    const query = queryOverride !== undefined
+      ? queryOverride
+      : document.getElementById(inputId)?.value;
+    if (!query || query.length < 2) return;
+
+    const resultsEl = document.getElementById(resultsId);
+    if (!resultsEl) return;
+    resultsEl.innerHTML = `<span class="spinner"></span>`;
+
+    try {
+      const people = await searchPeople(query);
+      if (!people.length) {
+        resultsEl.innerHTML = `<p style="font-size:12.5px;color:var(--text3);">No results found.</p>`;
+        return;
+      }
+
+      // Build extra data-* attributes string from extraData object
+      const extraAttrs = Object.entries(extraData)
+        .map(([k, v]) => `data-${k}="${escAttr(String(v))}"`).join(" ");
+
+      resultsEl.innerHTML = html`
+        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;">
+          ${safeHtml(people.slice(0, 6).map(p => {
+            const email = p.scoredEmailAddresses?.[0]?.address || "";
+            const initials = p.displayName.split(" ").map(n => n[0]).join("").slice(0, 2);
+            return html`
+              <div class="flex items-center gap-2"
+                style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);"
+                data-id="${p.id}"
+                data-name="${p.displayName}"
+                data-email="${email}"
+                ${extraAttrs}
+                onclick="${onClickFn}(this)"
+                onmouseover="this.style.background='var(--surface)'"
+                onmouseout="this.style.background=''">
+                <div class="avatar" style="width:24px;height:24px;font-size:10px;">${initials}</div>
+                <div style="flex:1;">
+                  <div style="font-size:13px;">${p.displayName}</div>
+                  <div style="font-size:11.5px;color:var(--text3);">${email}</div>
+                </div>
+              </div>
+            `;
+          }).join(""))}
+        </div>
+      `;
+    } catch (e) {
+      const resultsEl2 = document.getElementById(resultsId);
+      if (resultsEl2) resultsEl2.innerHTML =
+        html`<p style="font-size:12.5px;color:var(--red)">Search failed: ${e.message}</p>`;
+    }
+  }
+
+  function debounced(val) {
+    clearTimeout(_peopleSearchTimers[inputId]);
+    _peopleSearchTimers[inputId] = setTimeout(() => search(val), 400);
+  }
+
+  return { search, debounced };
+}
+
+// =============================================================
 // Defer main() until MSAL is confirmed loaded
 function startApp() {
   console.log("[FormStudio] startApp called, msal defined:", typeof msal !== "undefined");

@@ -24,58 +24,6 @@ function startNewForm(container) {
   renderBuilder(container);
 }
 
-async function editRequest(itemId, container) {
-  container = container || document.getElementById("main-content");
-  resetBuilderForm();
-  AppState.builderMode = "edit";
-  AppState.builderItemId = itemId;
-
-  container.innerHTML = `<div style="padding:60px;text-align:center;"><span class="spinner" style="width:32px;height:32px;border-width:3px;"></span><p style="margin-top:16px;color:var(--text2)">Loading form…</p></div>`;
-
-  try {
-    const siteId = await getSiteId();
-    const listId = await getListId(CONFIG.FORMS_LIST);
-    const item = await graphGet(`/sites/${siteId}/lists/${listId}/items/${itemId}?expand=fields`);
-    const f = item.fields || {};
-
-    AppState.builderForm.title = f.Title || "";
-    AppState.builderForm.listName = f.ListName || "";
-    // access, layout and submissionType live in the JSON definition, not SP columns.
-    // Set tentative defaults from SP fields first, then the JSON below will override.
-    AppState.builderForm.access = f.Access || "StaffStudents";
-    AppState.builderForm.submissionType = f.Type || "Submit";
-    AppState.builderForm.layout = f.Layout || "single";
-
-    // Load JSON attachment — this is the authoritative source for all form properties
-    const def = await getFormDefinition(CONFIG.FORMS_LIST, itemId);
-    if (def) {
-      if (def.sections)           AppState.builderForm.sections           = def.sections;
-      if (def.conditions)         AppState.builderForm.conditions         = def.conditions;
-      if (def.dependentDropdowns) AppState.builderForm.dependentDropdowns = def.dependentDropdowns;
-      if (def.specificPeople)     AppState.builderForm.specificPeople     = def.specificPeople;
-      if (def.formManagers)       AppState.builderForm.formManagers       = def.formManagers;
-      // Always load formManagers even when empty array (falsy check would skip [])
-      AppState.builderForm.formManagers = def.formManagers || [];
-      // These three are only reliably stored in the JSON — always prefer it
-      if (def.access)             AppState.builderForm.access             = def.access;
-      if (def.layout)             AppState.builderForm.layout             = def.layout;
-      if (def.submissionType)     AppState.builderForm.submissionType     = def.submissionType;
-      // Governance — merge saved values over the empty defaults so partial saves are safe
-      if (def.governance) {
-        AppState.builderForm.governance = Object.assign(
-          AppState.builderForm.governance,
-          def.governance
-        );
-      }
-    }
-
-    renderBuilder(container);
-  } catch (e) {
-    showToast("error", "Failed to load form: " + e.message);
-    renderAdminReview(container);
-  }
-}
-
 function renderBuilder(container) {
   const step = AppState.builderStep;
   container.innerHTML = html`
@@ -409,46 +357,14 @@ function renderStepGovernance(container) {
 // ---- Data Owner people-picker (governance step) ----
 // Exactly one person, not a list — selecting a person replaces any previous selection.
 
-let _dataOwnerSearchTimeout = null;
-function debouncedDataOwnerSearch(val) {
-  clearTimeout(_dataOwnerSearchTimeout);
-  _dataOwnerSearchTimeout = setTimeout(() => searchDataOwnerNow(val), 400);
-}
-
-async function searchDataOwnerNow(queryOverride) {
-  const query = queryOverride !== undefined ? queryOverride : document.getElementById("gov-data-owner-search")?.value;
-  if (!query || query.length < 2) return;
-  const resultsEl = document.getElementById("gov-data-owner-results");
-  if (!resultsEl) return;
-  resultsEl.innerHTML = `<span class="spinner"></span>`;
-  try {
-    const people = await searchPeople(query);
-    if (!people.length) {
-      resultsEl.innerHTML = `<p style="font-size:12.5px;color:var(--text3);">No results found.</p>`;
-      return;
-    }
-    resultsEl.innerHTML = html`
-      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;">
-        ${safeHtml(people.slice(0, 6).map(p => html`
-          <div class="flex items-center gap-2" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);"
-            data-id="${p.id}"
-            data-name="${p.displayName}"
-            data-email="${p.scoredEmailAddresses?.[0]?.address || ""}"
-            onclick="setDataOwnerFromEl(this)"
-            onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background=''">
-            <div class="avatar" style="width:24px;height:24px;font-size:10px;">${p.displayName.split(" ").map(n=>n[0]).join("").slice(0,2)}</div>
-            <div style="flex:1;">
-              <div style="font-size:13px;">${p.displayName}</div>
-              <div style="font-size:11.5px;color:var(--text3);">${p.scoredEmailAddresses?.[0]?.address || ""}</div>
-            </div>
-          </div>
-        `).join(""))}
-      </div>
-    `;
-  } catch (e) {
-    resultsEl.innerHTML = html`<p style="font-size:12.5px;color:var(--red)">Search failed: ${e.message}</p>`;
-  }
-}
+// Data owner search — single-select, replaces existing selection
+const _dataOwnerSearch = createPeopleSearch({
+  inputId:   "gov-data-owner-search",
+  resultsId: "gov-data-owner-results",
+  onClickFn: "setDataOwnerFromEl",
+});
+function debouncedDataOwnerSearch(val) { _dataOwnerSearch.debounced(val); }
+async function searchDataOwnerNow(q)   { await _dataOwnerSearch.search(q); }
 
 // Snapshot all governance DOM values into state before any re-render.
 // validateCurrentStep does this on Next — but mid-step re-renders (picker select/remove)
@@ -507,57 +423,23 @@ function renderSectionBlock(sec, si) {
         <input class="section-title-input" placeholder="Section title (optional)"
           value="${sec.title}"
           oninput="AppState.builderForm.sections[${si}].title=this.value">
-        <span style="color:var(--text3);font-size:12px;">${sec.fields.filter(f => !f.system).length} field${sec.fields.filter(f => !f.system).length !== 1 ? "s" : ""}</span>
-
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:${sec.managerOnly ? "var(--accent)" : "var(--text3)"};cursor:pointer;white-space:nowrap;"
-          title="When enabled, submitters cannot see this section — only form managers and admins can view and fill it">
+        <span style="color:var(--text3);font-size:12px;">${sec.fields.length} field${sec.fields.length !== 1 ? "s" : ""}</span>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:${sec.managerOnly ? "var(--accent)" : "var(--text3)"};cursor:pointer;white-space:nowrap;" title="When enabled, submitters cannot see this section — only form managers and admins can view and fill it">
           <input type="checkbox" class="toggle" style="width:14px;height:14px;" data-si="${si}"
             ${sec.managerOnly ? "checked" : ""}
             onchange="toggleManagerOnly(+this.dataset.si, this.checked)">
           Managers only
         </label>
-
-        ${safeHtml(sec.managerOnly ? `
-          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:${sec.notify ? "var(--green,#22c55e)" : "var(--text3)"};cursor:pointer;white-space:nowrap;border-left:1px solid var(--border);padding-left:10px;"
-            title="When enabled, a Notify button appears on this section allowing managers to send an email notification and mark it complete">
-            <input type="checkbox" class="toggle" style="width:14px;height:14px;" data-si="${si}"
-              ${sec.notify ? "checked" : ""}
-              onchange="toggleSectionNotify(+this.dataset.si, this.checked)">
-            Notify
-          </label>
-        ` : "")}
-
-        ${safeHtml(sec.managerOnly && sec.notify ? `
-          <input
-            class="input"
-            style="font-size:12px;padding:4px 8px;height:28px;min-width:220px;flex:1;"
-            placeholder="Notification emails (comma-separated)"
-            value="${escAttr(sec.deptEmail || "")}"
-            title="Comma-separated email addresses notified when this section is marked complete"
-            data-si="${si}"
-            oninput="AppState.builderForm.sections[+this.dataset.si].deptEmail=this.value">
-        ` : "")}
-
         <button class="btn btn-ghost btn-sm btn-icon" data-si="${si}" onclick="removeSection(+this.dataset.si)" aria-label="Remove section">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>
         </button>
       </div>
-
       ${safeHtml(sec.managerOnly ? `
         <div style="padding:6px 14px;background:rgba(79,124,255,0.06);border-bottom:1px solid var(--border);font-size:12px;color:var(--accent);display:flex;align-items:center;gap:6px;">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M7.122.392a1.75 1.75 0 011.756 0l5.25 3.045c.54.313.872.89.872 1.514V8.64c0 2.048-1.19 3.914-3.05 4.856l-2.5 1.286a1.75 1.75 0 01-1.6 0l-2.5-1.286C3.19 12.554 2 10.688 2 8.64V4.951c0-.624.332-1.2.872-1.514L7.122.392z"/></svg>
           This section is only visible to Form Managers and Admins
-          ${sec.notify && sec.deptEmail ? `
-            &nbsp;·&nbsp;
-            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4l6 5 6-5M2 4h12v9a1 1 0 01-1 1H3a1 1 0 01-1-1V4z"/></svg>
-            Notifies: ${escHtml(sec.deptEmail)}
-          ` : sec.notify ? `
-            &nbsp;·&nbsp;
-            <span style="color:var(--red,#ef4444);">⚠ No notification emails set</span>
-          ` : ""}
         </div>
       ` : "")}
-
       <div class="section-body">
         <div class="field-list" id="fields-${sec.id}">
           ${safeHtml(sec.fields.map((field, fi) => renderFieldItem(field, si, fi)).join(""))}
@@ -627,13 +509,11 @@ function renderFieldItem(field, si, fi) {
 function addSection() {
   const si = AppState.builderForm.sections.length;
   AppState.builderForm.sections.push({
-    id:          "s" + Date.now(),
-    title:       "",
-    stepIndex:   si,
+    id: "s" + Date.now(),
+    title: "",
+    stepIndex: si,  // Default each new section to its own step
     managerOnly: false,
-    notify:      false,   // whether the section has a Notify/Complete workflow
-    deptEmail:   "",      // comma-separated notification emails
-    fields:      []
+    fields: []
   });
   renderStepSections(document.getElementById("wizard-step-content"));
 }
@@ -709,38 +589,14 @@ function toggleManagerOnly(si, checked) {
   section.managerOnly = checked;
 
   if (checked) {
-    // Remove any stale system fields first (idempotent)
+    // Remove any stale system fields first (idempotent — safe to call twice)
     section.fields = section.fields.filter(f => !f.system);
-    // System fields only injected if notify is also on
-    if (section.notify) {
-      section.fields.push(...buildSystemFields(section));
-    }
+    // Append the 4 system fields at the end of the section's field list
+    const systemFields = buildSystemFields(section);
+    section.fields.push(...systemFields);
   } else {
-    // Turning off managerOnly also resets notify — the workflow
-    // makes no sense on a public section
-    section.notify    = false;
-    section.deptEmail = "";
-    section.fields    = section.fields.filter(f => !f.system);
-  }
-
-  renderStepSections(document.getElementById("wizard-step-content"));
-}
-
-// Toggling Notify on a managerOnly section injects or removes the
-// system fields that support the completion workflow.
-function toggleSectionNotify(si, checked) {
-  const section = AppState.builderForm.sections[si];
-  section.notify = checked;
-
-  // Remove stale system fields first regardless of direction
-  section.fields = section.fields.filter(f => !f.system);
-
-  if (checked) {
-    // Inject system fields now that notify is enabled
-    section.fields.push(...buildSystemFields(section));
-  } else {
-    // Turning notify off also clears the email list — no orphaned config
-    section.deptEmail = "";
+    // Strip system fields when manager-only is turned off
+    section.fields = section.fields.filter(f => !f.system);
   }
 
   renderStepSections(document.getElementById("wizard-step-content"));
@@ -1321,82 +1177,28 @@ function removePerson(id) {
   renderStepAccess(document.getElementById("wizard-step-content"));
 }
 
-let _peopleSearchTimeout = null;
-function debouncedPeopleSearch(val) {
-  clearTimeout(_peopleSearchTimeout);
-  _peopleSearchTimeout = setTimeout(() => searchPeopleNow(val), 400);
-}
-
-async function searchPeopleNow(queryOverride) {
-  const query = queryOverride !== undefined ? queryOverride : document.getElementById("people-search")?.value;
-  if (!query || query.length < 2) return;
-  const resultsEl = document.getElementById("people-results");
-  if (!resultsEl) return;
-  resultsEl.innerHTML = `<span class="spinner"></span>`;
-  try {
-    const people = await searchPeople(query);
-    if (!people.length) { resultsEl.innerHTML = `<p style="font-size:12.5px;color:var(--text3);">No results found.</p>`; return; }
-    resultsEl.innerHTML = html`
-      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;">
-        ${safeHtml(people.slice(0,6).map(p => html`
-          <div class="flex items-center gap-2" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);"
-            data-id="${p.id}" data-name="${p.displayName}" data-email="${p.scoredEmailAddresses?.[0]?.address || ""}"
-            onclick="addPersonFromEl(this)"
-            onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background=''">
-            <div class="avatar" style="width:24px;height:24px;font-size:10px;">${p.displayName.split(" ").map(n=>n[0]).join("").slice(0,2)}</div>
-            <div style="flex:1;">
-              <div style="font-size:13px;">${p.displayName}</div>
-              <div style="font-size:11.5px;color:var(--text3)">${p.scoredEmailAddresses?.[0]?.address || ""}</div>
-            </div>
-          </div>
-        `).join(""))}
-      </div>
-    `;
-  } catch (e) {
-    resultsEl.innerHTML = html`<p style="font-size:12.5px;color:var(--red)">Search failed: ${e.message}</p>`;
-  }
-}
+// Specific people search (Access step — who can submit this form)
+const _peopleSearch = createPeopleSearch({
+  inputId:   "people-search",
+  resultsId: "people-results",
+  onClickFn: "addPersonFromEl",
+});
+function debouncedPeopleSearch(val) { _peopleSearch.debounced(val); }
+async function searchPeopleNow(q)   { await _peopleSearch.search(q); }
 
 function removeManager(id) {
   AppState.builderForm.formManagers = AppState.builderForm.formManagers.filter(p => p.id !== id);
   renderStepAccess(document.getElementById("wizard-step-content"));
 }
 
-let _managersSearchTimeout = null;
-function debouncedManagerSearch(val) {
-  clearTimeout(_managersSearchTimeout);
-  _managersSearchTimeout = setTimeout(() => searchManagersNow(val), 400);
-}
-
-async function searchManagersNow(queryOverride) {
-  const query = queryOverride !== undefined ? queryOverride : document.getElementById("managers-search")?.value;
-  if (!query || query.length < 2) return;
-  const resultsEl = document.getElementById("managers-results");
-  if (!resultsEl) return;
-  resultsEl.innerHTML = `<span class="spinner"></span>`;
-  try {
-    const people = await searchPeople(query);
-    if (!people.length) { resultsEl.innerHTML = `<p style="font-size:12.5px;color:var(--text3);">No results found.</p>`; return; }
-    resultsEl.innerHTML = html`
-      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;">
-        ${safeHtml(people.slice(0,6).map(p => html`
-          <div class="flex items-center gap-2" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);"
-            data-id="${p.id}" data-name="${p.displayName}" data-email="${p.scoredEmailAddresses?.[0]?.address || ""}"
-            onclick="addManagerFromEl(this)"
-            onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background=''">
-            <div class="avatar" style="width:24px;height:24px;font-size:10px;">${p.displayName.split(" ").map(n=>n[0]).join("").slice(0,2)}</div>
-            <div style="flex:1;">
-              <div style="font-size:13px;">${p.displayName}</div>
-              <div style="font-size:11.5px;color:var(--text3)">${p.scoredEmailAddresses?.[0]?.address || ""}</div>
-            </div>
-          </div>
-        `).join(""))}
-      </div>
-    `;
-  } catch (e) {
-    resultsEl.innerHTML = html`<p style="font-size:12.5px;color:var(--red)">Search failed: ${e.message}</p>`;
-  }
-}
+// Form managers search (Access step — who can manage submissions)
+const _managersSearch = createPeopleSearch({
+  inputId:   "managers-search",
+  resultsId: "managers-results",
+  onClickFn: "addManagerFromEl",
+});
+function debouncedManagerSearch(val) { _managersSearch.debounced(val); }
+async function searchManagersNow(q)  { await _managersSearch.search(q); }
 
 function addManagerFromEl(el) {
   addManager(el.dataset.id, el.dataset.name, el.dataset.email);
@@ -1606,9 +1408,44 @@ function renderPreviewField(field) {
   `;
 }
 
+// =============================================================
+// LOAD FORM INTO BUILDER
+// Single shared function that loads a form definition from
+// SharePoint into AppState.builderForm. Used by:
+//   - doEditFormRequest (admin.js) — after its cleanup steps
+//   - previewRequest (builder.js) — jumps to the review step
+//
+// Replaces the duplicated editRequest (builder.js) and the
+// inline loading block in doEditFormRequest (admin.js) that
+// was missing governance, causing it to be lost on edit.
+// =============================================================
+async function loadFormIntoBuilder(itemId) {
+  resetBuilderForm();
+  AppState.builderMode   = "edit";
+  AppState.builderItemId = itemId;
+
+  const def = await getFormDefinition(CONFIG.FORMS_LIST, itemId);
+  if (def) {
+    AppState.builderForm.title              = def.title              || "";
+    AppState.builderForm.listName           = def.listName           || generateListName(def.title);
+    AppState.builderForm.access             = def.access             || "StaffStudents";
+    AppState.builderForm.submissionType     = def.submissionType     || "Submit";
+    AppState.builderForm.layout             = def.layout             || "single";
+    AppState.builderForm.sections           = def.sections           || [];
+    AppState.builderForm.conditions         = def.conditions         || [];
+    AppState.builderForm.dependentDropdowns = def.dependentDropdowns || [];
+    AppState.builderForm.specificPeople     = def.specificPeople     || [];
+    AppState.builderForm.formManagers       = def.formManagers       || [];
+    if (def.governance) {
+      Object.assign(AppState.builderForm.governance, def.governance);
+    }
+  }
+  return def;
+}
+
 function previewRequest(itemId) {
-  // Show a modal preview of the form
-  editRequest(itemId).then(() => {
+  // Load the form into the builder then jump straight to the Review step
+  loadFormIntoBuilder(itemId).then(() => {
     AppState.builderStep = WIZARD_STEPS.findIndex(s => s.key === "review");
     renderBuilder(document.getElementById("main-content"));
   });
