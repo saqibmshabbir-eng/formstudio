@@ -1193,6 +1193,16 @@ label {
   padding: 14px 18px;
   background: var(--section-bg);
   border-bottom: 2px solid var(--section-title-border);
+  flex-wrap: wrap;
+}
+
+.section-notify-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  background: var(--section-bg);
+  border-bottom: 1px solid var(--section-title-border);
 }
 
 .section-title-input {

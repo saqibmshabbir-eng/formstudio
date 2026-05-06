@@ -417,8 +417,49 @@ function renderStepSections(container) {
 
 function renderSectionBlock(sec, si) {
   const nonSystemFieldCount = sec.fields.filter(f => !f.system).length;
+  // Build the Notify toggle string — plain template so we can nest it in safeHtml
+  const notifyToggle = sec.managerOnly ? `
+    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:${sec.notify ? "var(--green,#22c55e)" : "var(--text3)"};cursor:pointer;white-space:nowrap;border-left:1px solid var(--border);padding-left:10px;"
+      title="When enabled, managers can mark this section complete and notify a team by email">
+      <input type="checkbox" class="toggle" style="width:14px;height:14px;" data-si="${si}"
+        ${sec.notify ? "checked" : ""}
+        onchange="toggleSectionNotify(+this.dataset.si, this.checked)">
+      Notify
+    </label>
+  ` : "";
+
+  // Notify email row — full width, shown below the header when notify is on
+  const notifyRow = (sec.managerOnly && sec.notify) ? `
+    <div class="section-notify-row">
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--text3)" stroke-width="1.5"><path d="M2 4l6 5 6-5M2 4h12v9a1 1 0 01-1 1H3a1 1 0 01-1-1V4z"/></svg>
+      <label style="font-size:12px;color:var(--text3);white-space:nowrap;">Notification emails:</label>
+      <input
+        class="input"
+        style="font-size:12px;padding:4px 8px;height:28px;flex:1;"
+        placeholder="e.g. dept@le.ac.uk, manager@le.ac.uk"
+        value="${escAttr(sec.deptEmail || "")}"
+        title="Comma-separated email addresses notified when this section is marked complete"
+        data-si="${si}"
+        oninput="AppState.builderForm.sections[+this.dataset.si].deptEmail=this.value">
+    </div>
+  ` : "";
+
+  // Manager-only info bar
+  const infoBar = sec.managerOnly ? `
+    <div style="padding:6px 14px;background:rgba(79,124,255,0.06);border-bottom:1px solid var(--border);font-size:12px;color:var(--accent);display:flex;align-items:center;gap:6px;">
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M7.122.392a1.75 1.75 0 011.756 0l5.25 3.045c.54.313.872.89.872 1.514V8.64c0 2.048-1.19 3.914-3.05 4.856l-2.5 1.286a1.75 1.75 0 01-1.6 0l-2.5-1.286C3.19 12.554 2 10.688 2 8.64V4.951c0-.624.332-1.2.872-1.514L7.122.392z"/></svg>
+      This section is only visible to Form Managers and Admins
+      ${sec.notify && sec.deptEmail
+        ? `&nbsp;·&nbsp;<svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4l6 5 6-5M2 4h12v9a1 1 0 01-1 1H3a1 1 0 01-1-1V4z"/></svg> Notifies: ${escHtml(sec.deptEmail)}`
+        : sec.notify
+          ? `&nbsp;·&nbsp;<span style="color:var(--red,#ef4444);">⚠ No notification emails set</span>`
+          : ""}
+    </div>
+  ` : "";
+
   return html`
     <div class="section-block${sec.managerOnly ? " section-manager-only" : ""}" id="section-${sec.id}">
+
       <div class="section-header">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="var(--text3)" stroke-width="1.5"><path d="M1 4h12M1 7h12M1 10h8"/></svg>
         <input class="section-title-input" placeholder="Section title (optional)"
@@ -434,46 +475,15 @@ function renderSectionBlock(sec, si) {
           Managers only
         </label>
 
-        ${safeHtml(sec.managerOnly ? `
-          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:${sec.notify ? "var(--green,#22c55e)" : "var(--text3)"};cursor:pointer;white-space:nowrap;border-left:1px solid var(--border);padding-left:10px;"
-            title="When enabled, a Notify button appears on this section allowing managers to send an email notification and mark it complete">
-            <input type="checkbox" class="toggle" style="width:14px;height:14px;" data-si="${si}"
-              ${sec.notify ? "checked" : ""}
-              onchange="toggleSectionNotify(+this.dataset.si, this.checked)">
-            Notify
-          </label>
-        ` : "")}
-
-        ${safeHtml(sec.managerOnly && sec.notify ? `
-          <input
-            class="input"
-            style="font-size:12px;padding:4px 8px;height:28px;min-width:220px;flex:1;"
-            placeholder="Notification emails (comma-separated)"
-            value="${escAttr(sec.deptEmail || "")}"
-            title="Comma-separated email addresses notified when this section is marked complete"
-            data-si="${si}"
-            oninput="AppState.builderForm.sections[+this.dataset.si].deptEmail=this.value">
-        ` : "")}
+        ${safeHtml(notifyToggle)}
 
         <button class="btn btn-ghost btn-sm btn-icon" data-si="${si}" onclick="removeSection(+this.dataset.si)" aria-label="Remove section">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>
         </button>
       </div>
 
-      ${safeHtml(sec.managerOnly ? `
-        <div style="padding:6px 14px;background:rgba(79,124,255,0.06);border-bottom:1px solid var(--border);font-size:12px;color:var(--accent);display:flex;align-items:center;gap:6px;">
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M7.122.392a1.75 1.75 0 011.756 0l5.25 3.045c.54.313.872.89.872 1.514V8.64c0 2.048-1.19 3.914-3.05 4.856l-2.5 1.286a1.75 1.75 0 01-1.6 0l-2.5-1.286C3.19 12.554 2 10.688 2 8.64V4.951c0-.624.332-1.2.872-1.514L7.122.392z"/></svg>
-          This section is only visible to Form Managers and Admins
-          ${sec.notify && sec.deptEmail ? `
-            &nbsp;·&nbsp;
-            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4l6 5 6-5M2 4h12v9a1 1 0 01-1 1H3a1 1 0 01-1-1V4z"/></svg>
-            Notifies: ${escHtml(sec.deptEmail)}
-          ` : sec.notify ? `
-            &nbsp;·&nbsp;
-            <span style="color:var(--red,#ef4444);">⚠ No notification emails set</span>
-          ` : ""}
-        </div>
-      ` : "")}
+      ${safeHtml(notifyRow)}
+      ${safeHtml(infoBar)}
 
       <div class="section-body">
         <div class="field-list" id="fields-${sec.id}">
@@ -487,6 +497,7 @@ function renderSectionBlock(sec, si) {
     </div>
   `;
 }
+
 
 function renderFieldItem(field, si, fi) {
   const typeLabel = CONFIG.FIELD_TYPES.find(t => t.value === field.type)?.label || field.type;
