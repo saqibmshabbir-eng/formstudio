@@ -197,6 +197,7 @@ async function openFormSubmissions(formItemId) {
     }
     // Filter out soft-deleted items by default
     _submissions = rawItems.filter(i => !i.fields?.IsDeleted);
+    console.log("[AssignedTo debug] raw fields sample:", JSON.stringify(rawItems[0]?.fields || {}));
     _subFilter  = "";
     _subSortCol = "Modified";
     _subSortAsc = false;
@@ -334,16 +335,10 @@ function renderSubmissionsTable(container) {
                   const f = item.fields || {};
                   const hasAttachment = f.Attachments === true || f.Attachments === 1 || item.hasAttachments === true;
                   // Per-row assignment check — drives which action buttons are visible.
-                  // Person columns from Graph include { LookupId, LookupValue, Email }.
-                  // Use Email as primary match (consistent with rest of codebase),
-                  // with LookupId as fallback in case Email is absent.
                   const assignedTo    = f[CONFIG.COL_ASSIGNED_TO];
                   const assignedEmail = (assignedTo?.Email || "").toLowerCase();
                   const assignedName  = assignedTo?.LookupValue || "";
-                  const isMine        = assignedTo && (
-                    (assignedEmail && assignedEmail === currentEmail) ||
-                    (assignedTo.LookupId && parseInt(assignedTo.LookupId) === AppState._currentUserSpId)
-                  );
+                  const isMine        = !!assignedEmail && assignedEmail === currentEmail;
                   const isUnassigned  = !assignedTo;
                   const assignTitle   = isUnassigned ? "Assign to me" : `Take from ${assignedName}`;
                   return html`<tr style="cursor:pointer;" data-id="${item.id}"
@@ -427,15 +422,10 @@ function viewSubmission(submissionId) {
   const hasFileUpload = allFields.some(field => field.type === "FileUpload");
   const listName = _currentFormItem?.fields?.[CONFIG.COL_LISTNAME] || _currentFormDef?.listName || "";
 
-  // Edit button is only shown when the row is currently assigned to the
-  // signed-in user. Use Email as primary match with LookupId as fallback.
+  // Edit button is only shown when the row is currently assigned to the signed-in user.
   const currentEmail  = (AppState.currentUser?.email || "").toLowerCase();
-  const assignedTo    = f[CONFIG.COL_ASSIGNED_TO];
-  const assignedEmail = (assignedTo?.Email || "").toLowerCase();
-  const isMine        = assignedTo && (
-    (assignedEmail && assignedEmail === currentEmail) ||
-    (assignedTo.LookupId && parseInt(assignedTo.LookupId) === AppState._currentUserSpId)
-  );
+  const assignedEmail = (f[CONFIG.COL_ASSIGNED_TO]?.Email || "").toLowerCase();
+  const isMine        = !!assignedEmail && assignedEmail === currentEmail;
 
   openModal(html`
     <div class="modal-header">
