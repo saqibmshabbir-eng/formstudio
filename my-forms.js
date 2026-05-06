@@ -43,11 +43,11 @@ async function renderMyForms(container) {
         const listName = item.fields[CONFIG.COL_LISTNAME];
         try {
           const listId   = await getListId(listName);
+          // Probe only — we just need to know the list has at least one item.
+          // No filter or expand needed; soft-deleted items are filtered properly
+          // when the full submissions load runs (line 199).
           const response = await graphGet(
-            `/sites/${siteId}/lists/${listId}/items` +
-            `?expand=fields($select=IsDeleted)` +
-            `&$filter=fields/IsDeleted ne true` +
-            `&$top=1`
+            `/sites/${siteId}/lists/${listId}/items?$top=1`
           );
           return (response?.value?.length || 0) > 0;
         } catch (_) {
@@ -342,21 +342,21 @@ function renderSubmissionsTable(container) {
                   const assignTitle   = isUnassigned ? "Assign to me" : `Take from ${assignedName}`;
                   return html`<tr style="cursor:pointer;" data-id="${item.id}"
                     onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
-                    <td onclick="viewSubmission('${item.id}')" style="font-size:13px;color:var(--text2);">
+                    <td onclick="viewOrOpenSubmission('${item.id}','${_currentFormItem.id}',${isManager})" style="font-size:13px;color:var(--text2);">
                       ${assignedName ? escHtml(assignedName) : safeHtml(`<span style="color:var(--text3);">—</span>`)}
                     </td>
                     ${safeHtml(visibleFields.map(field => html`
-                      <td onclick="viewSubmission('${item.id}')">${formatFieldValue(f[field.internalName || field.label]).slice(0, 80)}</td>
+                      <td onclick="viewOrOpenSubmission('${item.id}','${_currentFormItem.id}',${isManager})">${formatFieldValue(f[field.internalName || field.label]).slice(0, 80)}</td>
                     `).join(""))}
-                    <td onclick="viewSubmission('${item.id}')" style="color:var(--text2);font-size:12.5px;">${formatDate(f.Modified)}</td>
-                    ${safeHtml(hasFileUpload ? `<td onclick="viewSubmission('${item.id}')" style="text-align:center;">
+                    <td onclick="viewOrOpenSubmission('${item.id}','${_currentFormItem.id}',${isManager})" style="color:var(--text2);font-size:12.5px;">${formatDate(f.Modified)}</td>
+                    ${safeHtml(hasFileUpload ? `<td onclick="viewOrOpenSubmission('${item.id}','${_currentFormItem.id}',${isManager})" style="text-align:center;">
                       ${hasAttachment
                         ? `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="var(--accent)" stroke-width="1.5" title="Has attachment"><path d="M13.5 8.5l-5.5 5.5a4 4 0 01-5.66-5.66l6-6a2.5 2.5 0 013.54 3.54l-6.01 6a1 1 0 01-1.41-1.41l5.5-5.5"/></svg>`
                         : `<span style="color:var(--text3)">—</span>`}
                     </td>` : "")}
                     <td onclick="event.stopPropagation()">
                       <div class="flex gap-1">
-                        <button class="btn btn-ghost btn-sm btn-icon" title="View" data-id="${item.id}" onclick="viewSubmission(this.dataset.id)">
+                        <button class="btn btn-ghost btn-sm btn-icon" title="View" data-id="${item.id}" data-formid="${_currentFormItem.id}" data-ismanager="${isManager}" onclick="viewOrOpenSubmission(this.dataset.id,this.dataset.formid,this.dataset.ismanager==='true')">
                           <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="3"/><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/></svg>
                         </button>
                         ${safeHtml(isManager && isMine ? html`
@@ -401,6 +401,17 @@ function renderSubmissionsTable(container) {
 // =============================================================
 // VIEW SUBMISSION
 // =============================================================
+// Routes a submission click based on role.
+// Managers open the full live form (so the Complete button is available).
+// Submitters get the read-only modal.
+function viewOrOpenSubmission(submissionId, formItemId, isManager) {
+  if (isManager && formItemId) {
+    openLiveForm(formItemId, submissionId);
+  } else {
+    viewSubmission(submissionId);
+  }
+}
+
 function viewSubmission(submissionId) {
   const item = _submissions.find(i => i.id === submissionId);
   if (!item) return;
