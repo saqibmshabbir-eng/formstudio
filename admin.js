@@ -697,6 +697,20 @@ async function doCreateSharePointList(listName, def, access, authorEmail = null)
     console.warn("AssignedTo column failed:", e.message);
   }
 
+  // Add AssignedToEmail plain text column — written by the app alongside AssignedTo.
+  // Graph returns Person columns created via the API as a display name string with
+  // no Email property. AssignedToEmail stores the email explicitly so isMine checks
+  // can compare by email rather than display name (which is not unique).
+  try {
+    await graphPost(`/sites/${siteId}/lists/${newListId}/columns`, {
+      name: CONFIG.COL_ASSIGNED_TO_EMAIL,
+      displayName: "Assigned To Email",
+      text: {},
+    });
+  } catch (e) {
+    console.warn("AssignedToEmail column failed:", e.message);
+  }
+
   // ── System columns for Form Manager (managerOnly) sections ──────────────
   // For every managerOnly section we provision 4 protected columns:
   //   {key}_DeptEmail      Text     — comma-separated notification emails

@@ -206,7 +206,6 @@ async function openFormSubmissions(formItemId) {
     }
     // Filter out soft-deleted items by default
     _submissions = rawItems.filter(i => !i.fields?.IsDeleted);
-    console.log("[ClaimedBy debug] raw fields sample:", JSON.stringify(rawItems[0]?.fields || {}));
     _subFilter  = "";
     _subSortCol = "Modified";
     _subSortAsc = false;
@@ -343,12 +342,12 @@ function renderSubmissionsTable(container) {
               : rows.map(item => {
                   const f = item.fields || {};
                   const hasAttachment = f.Attachments === true || f.Attachments === 1 || item.hasAttachments === true;
-                  // Per-row assignment check — drives which action buttons are visible.
-                  const assignedTo    = f[CONFIG.COL_ASSIGNED_TO];
-                  const assignedEmail = (assignedTo?.Email || "").toLowerCase();
-                  const assignedName  = assignedTo?.LookupValue || "";
+                  // AssignedToEmail is written by the app alongside the AssignedTo person
+                  // column — use it for exact email comparison rather than display name.
+                  const assignedEmail = (f[CONFIG.COL_ASSIGNED_TO_EMAIL] || "").toLowerCase();
+                  const assignedName  = f[CONFIG.COL_ASSIGNED_TO] || "";
                   const isMine        = !!assignedEmail && assignedEmail === currentEmail;
-                  const isUnassigned  = !assignedTo;
+                  const isUnassigned  = !assignedName;
                   const assignTitle   = isUnassigned ? "Assign to me" : `Take from ${assignedName}`;
                   return html`<tr style="cursor:pointer;" data-id="${item.id}"
                     onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
@@ -432,8 +431,9 @@ function viewSubmission(submissionId) {
   const listName = _currentFormItem?.fields?.[CONFIG.COL_LISTNAME] || _currentFormDef?.listName || "";
 
   // Edit button is only shown when the row is currently assigned to the signed-in user.
+  // Use AssignedToEmail (plain text column written by the app) for exact email comparison.
   const currentEmail  = (AppState.currentUser?.email || "").toLowerCase();
-  const assignedEmail = (f[CONFIG.COL_ASSIGNED_TO]?.Email || "").toLowerCase();
+  const assignedEmail = (f[CONFIG.COL_ASSIGNED_TO_EMAIL] || "").toLowerCase();
   const isMine        = !!assignedEmail && assignedEmail === currentEmail;
 
   openModal(html`
@@ -794,22 +794,20 @@ async function assignSubmissionToMe(submissionId) {
     if (!spUserId) throw new Error("Could not resolve current user to a SharePoint ID");
 
     // Person columns are written via Graph as <ColumnName>LookupId with the integer ID.
+    // AssignedToEmail is written alongside as a plain text column so isMine checks
+    // can compare by email — Graph does not return Email on programmatic Person columns.
     await updateListItem(listName, submissionId, {
       [`${CONFIG.COL_ASSIGNED_TO}LookupId`]: spUserId,
+      [CONFIG.COL_ASSIGNED_TO_EMAIL]:        email,
     });
 
-    // Update local state optimistically — SP replication lag means a re-fetch
-    // immediately after the PATCH often returns the old value. Trust the PATCH
     // Update local state optimistically — SP replication lag means a re-fetch
     // immediately after the PATCH often returns the old value. Trust the PATCH.
     const idx = _submissions.findIndex(i => i.id === submissionId);
     if (idx !== -1) {
       _submissions[idx].fields = _submissions[idx].fields || {};
-      _submissions[idx].fields[CONFIG.COL_ASSIGNED_TO] = {
-        LookupId:    AppState._currentUserSpId,
-        LookupValue: AppState.currentUser?.displayName || email,
-        Email:       email,
-      };
+      _submissions[idx].fields[CONFIG.COL_ASSIGNED_TO]       = AppState.currentUser?.displayName || email;
+      _submissions[idx].fields[CONFIG.COL_ASSIGNED_TO_EMAIL] = email;
     }
 
     showToast("success", "Assigned to you");
