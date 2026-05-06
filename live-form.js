@@ -118,7 +118,6 @@ async function openLiveForm(itemId, editItemId) {
 
     const def = await getFormDefinition(CONFIG.FORMS_LIST, itemId);
     if (!def) throw new Error("Form definition not found. Ensure the FormDefinition column exists on the Forms list.");
-    console.log("[def debug] sections:", JSON.stringify(def.sections.map(s => ({ id: s.id, notify: s.notify, fields: s.fields.map(f => ({ id: f.id, label: f.label, system: f.system, systemRole: f.systemRole })) }))));
 
     // If editing an existing submission, load its values for pre-population
     let prefillValues = undefined;
