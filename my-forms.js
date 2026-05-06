@@ -197,6 +197,7 @@ async function openFormSubmissions(formItemId) {
     }
     // Filter out soft-deleted items by default
     _submissions = rawItems.filter(i => !i.fields?.IsDeleted);
+    console.log("[ClaimedBy debug] raw fields sample:", JSON.stringify(rawItems[0]?.fields || {}));
     _subFilter  = "";
     _subSortCol = "Modified";
     _subSortAsc = false;
