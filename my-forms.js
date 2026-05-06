@@ -333,11 +333,17 @@ function renderSubmissionsTable(container) {
               : rows.map(item => {
                   const f = item.fields || {};
                   const hasAttachment = f.Attachments === true || f.Attachments === 1 || item.hasAttachments === true;
-                  // Per-row assignment check — drives which action buttons are visible
+                  // Per-row assignment check — drives which action buttons are visible.
+                  // Person columns from Graph include { LookupId, LookupValue, Email }.
+                  // Use Email as primary match (consistent with rest of codebase),
+                  // with LookupId as fallback in case Email is absent.
                   const assignedTo    = f[CONFIG.COL_ASSIGNED_TO];
                   const assignedEmail = (assignedTo?.Email || "").toLowerCase();
                   const assignedName  = assignedTo?.LookupValue || "";
-                  const isMine        = !!assignedEmail && assignedEmail === currentEmail;
+                  const isMine        = assignedTo && (
+                    (assignedEmail && assignedEmail === currentEmail) ||
+                    (assignedTo.LookupId && parseInt(assignedTo.LookupId) === AppState._currentUserSpId)
+                  );
                   const isUnassigned  = !assignedTo;
                   const assignTitle   = isUnassigned ? "Assign to me" : `Take from ${assignedName}`;
                   return html`<tr style="cursor:pointer;" data-id="${item.id}"
@@ -422,11 +428,14 @@ function viewSubmission(submissionId) {
   const listName = _currentFormItem?.fields?.[CONFIG.COL_LISTNAME] || _currentFormDef?.listName || "";
 
   // Edit button is only shown when the row is currently assigned to the
-  // signed-in user. Anyone else must claim the row via "Assign to me" on
-  // the table first — keeps the table the single entry-point for claims.
+  // signed-in user. Use Email as primary match with LookupId as fallback.
   const currentEmail  = (AppState.currentUser?.email || "").toLowerCase();
-  const assignedEmail = (f[CONFIG.COL_ASSIGNED_TO]?.Email || "").toLowerCase();
-  const isMine        = !!assignedEmail && assignedEmail === currentEmail;
+  const assignedTo    = f[CONFIG.COL_ASSIGNED_TO];
+  const assignedEmail = (assignedTo?.Email || "").toLowerCase();
+  const isMine        = assignedTo && (
+    (assignedEmail && assignedEmail === currentEmail) ||
+    (assignedTo.LookupId && parseInt(assignedTo.LookupId) === AppState._currentUserSpId)
+  );
 
   openModal(html`
     <div class="modal-header">
@@ -786,39 +795,25 @@ async function assignSubmissionToMe(submissionId) {
     if (!spUserId) throw new Error("Could not resolve current user to a SharePoint ID");
 
     // Person columns are written via Graph as <ColumnName>LookupId with the integer ID.
-    // Same pattern as GovDataOwnerLookupId in builder.js.
     await updateListItem(listName, submissionId, {
       [`${CONFIG.COL_ASSIGNED_TO}LookupId`]: spUserId,
     });
 
-    // Re-fetch this row from SP to get the *actual* current assignment, not just
-    // what we tried to write. This closes the simultaneous-click race: the loser's
-    // re-fetch reflects the winner and the UI re-renders without Edit/Delete buttons
-    // for them, with "Assign to me" still present so they can take it back if they want.
-    try {
-      const siteId = await getSiteId();
-      const listId = await getListId(listName);
-      const fresh  = await graphGet(`/sites/${siteId}/lists/${listId}/items/${submissionId}?expand=fields,createdBy`);
-      const idx    = _submissions.findIndex(i => i.id === submissionId);
-      if (idx !== -1 && fresh) _submissions[idx] = fresh;
-    } catch (e) {
-      console.warn("Could not refresh row after assign:", e.message);
+    // Update local state optimistically — SP replication lag means a re-fetch
+    // immediately after the PATCH often returns the old value. Trust the PATCH
+    // and update in memory using LookupId (Graph doesn't return Email on Person
+    // columns via the fields expand so isMine is compared by LookupId).
+    const idx = _submissions.findIndex(i => i.id === submissionId);
+    if (idx !== -1) {
+      _submissions[idx].fields = _submissions[idx].fields || {};
+      _submissions[idx].fields[CONFIG.COL_ASSIGNED_TO] = {
+        LookupId:    AppState._currentUserSpId,
+        LookupValue: AppState.currentUser?.displayName || email,
+        Email:       email,
+      };
     }
 
-    // Tell the user whether they actually won, based on the refreshed row
-    const refreshed     = _submissions.find(i => i.id === submissionId);
-    const nowAssigned   = refreshed?.fields?.[CONFIG.COL_ASSIGNED_TO];
-    const nowEmail      = (nowAssigned?.Email || "").toLowerCase();
-    if (nowEmail === email.toLowerCase()) {
-      showToast("success", "Assigned to you");
-    } else if (nowAssigned) {
-      showToast("info", `Already assigned to ${nowAssigned.LookupValue || "another user"}`);
-    } else {
-      // Write succeeded according to SP but row came back unassigned — unusual,
-      // probably a transient read; surface as info rather than error
-      showToast("info", "Assignment did not stick — please try again");
-    }
-
+    showToast("success", "Assigned to you");
     renderSubmissionsTable(document.getElementById("main-content"));
   } catch (e) {
     showToast("error", "Could not assign: " + e.message);
