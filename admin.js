@@ -110,7 +110,7 @@ async function renderAdminReview(container) {
                 <td style="color:var(--text2);font-size:12.5px;">${formatDate(f.Modified)}</td>
                 <td>
                   <div class="flex gap-2" style="flex-wrap:wrap;gap:6px;">
-                    <button class="btn btn-sm btn-ghost" data-id="${item.id}" data-title="${f.Title||""}" onclick="adminPreviewForm(this.dataset.id, this.dataset.title)">
+                    <button class="btn btn-sm btn-secondary" data-id="${item.id}" data-title="${f.Title||""}" onclick="adminPreviewForm(this.dataset.id, this.dataset.title)">
                       <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="3"/><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/></svg>
                       View
                     </button>
