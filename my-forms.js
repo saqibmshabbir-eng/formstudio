@@ -197,7 +197,6 @@ async function openFormSubmissions(formItemId) {
     }
     // Filter out soft-deleted items by default
     _submissions = rawItems.filter(i => !i.fields?.IsDeleted);
-    console.log("[AssignedTo debug] raw fields sample:", JSON.stringify(rawItems[0]?.fields || {}));
     _subFilter  = "";
     _subSortCol = "Modified";
     _subSortAsc = false;
@@ -791,8 +790,8 @@ async function assignSubmissionToMe(submissionId) {
 
     // Update local state optimistically — SP replication lag means a re-fetch
     // immediately after the PATCH often returns the old value. Trust the PATCH
-    // and update in memory using LookupId (Graph doesn't return Email on Person
-    // columns via the fields expand so isMine is compared by LookupId).
+    // Update local state optimistically — SP replication lag means a re-fetch
+    // immediately after the PATCH often returns the old value. Trust the PATCH.
     const idx = _submissions.findIndex(i => i.id === submissionId);
     if (idx !== -1) {
       _submissions[idx].fields = _submissions[idx].fields || {};
