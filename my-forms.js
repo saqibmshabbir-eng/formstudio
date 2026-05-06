@@ -187,7 +187,16 @@ async function openFormSubmissions(formItemId) {
     // authors and managers with Contribute see everything
     let rawItems;
     try {
-      rawItems = await getListItems(listName);
+      // Use a direct graphGet so we can expand ClaimedBy as a full person object
+      // (Email, LookupValue). getListItems uses expand=fields which only returns
+      // programmatically-created Person columns as {ColumnName}LookupId strings.
+      const siteId = await getSiteId();
+      const listId = await getListId(listName);
+      const data = await graphGet(
+        `/sites/${siteId}/lists/${listId}/items` +
+        `?expand=fields($expand=${CONFIG.COL_ASSIGNED_TO}),createdBy`
+      );
+      rawItems = data.value || [];
     } catch (e) {
       // Graph returns 404 when the user lacks read access — not a missing list
       if (e.message?.includes("404") || e.message?.includes("not found")) {
