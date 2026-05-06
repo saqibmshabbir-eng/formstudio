@@ -359,25 +359,29 @@ async function doEditFormRequest(itemId) {
     const def = await getFormDefinition(CONFIG.FORMS_LIST, itemId);
     if (!def) throw new Error("Form definition not found");
 
-    showProgress("Cleaning up", "Deleting data list…");
-
-    // Delete the provisioned SP data list if it exists
+    // Delete the provisioned SP data list if it exists.
+    // Track whether one was actually deleted so we can show the right toast.
+    let listDeleted = false;
     const listName = def.listName;
     if (listName) {
       try {
+        showProgress("Cleaning up", "Checking for existing data list…");
         const siteId = await getSiteId();
         const lists  = await graphGet(`/sites/${siteId}/lists`);
         const existing = (lists.value || []).find(l => l.displayName === listName);
-        if (existing) await graphDelete(`/sites/${siteId}/lists/${existing.id}`);
+        if (existing) {
+          updateProgress("Deleting data list…");
+          await graphDelete(`/sites/${siteId}/lists/${existing.id}`);
+          listDeleted = true;
+        }
       } catch (e) {
         console.warn("Could not delete SP data list:", e.message);
       }
     }
 
-    // Reset the Forms item back to Created rather than deleting it —
-    // the author edits in place and re-submits. Clear ListName so there
+    // Reset the Forms item back to Created — clear ListName so there
     // is no stale reference to the deleted data list.
-    updateProgress("Resetting form entry…");
+    if (listDeleted) updateProgress("Resetting form entry…");
     try {
       await updateListItem(CONFIG.FORMS_LIST, itemId, {
         [CONFIG.COL_STATUS]:   "Created",
@@ -395,7 +399,12 @@ async function doEditFormRequest(itemId) {
     // consistently regardless of which edit path is taken.
     await loadFormIntoBuilder(itemId);
     renderBuilder(main);
-    showToast("info", "Data list removed — edit and re-submit for review when ready");
+
+    // Only mention list removal if one was actually deleted
+    showToast("info", listDeleted
+      ? "Data list removed — edit and re-submit for review when ready"
+      : "Form loaded for editing — re-submit for review when ready"
+    );
 
   } catch (e) {
     hideProgress();
