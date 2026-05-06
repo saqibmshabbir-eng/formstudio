@@ -118,6 +118,7 @@ async function openLiveForm(itemId, editItemId) {
 
     const def = await getFormDefinition(CONFIG.FORMS_LIST, itemId);
     if (!def) throw new Error("Form definition not found. Ensure the FormDefinition column exists on the Forms list.");
+    console.log("[def debug] sections:", JSON.stringify(def.sections.map(s => ({ id: s.id, notify: s.notify, fields: s.fields.map(f => ({ id: f.id, label: f.label, system: f.system, systemRole: f.systemRole })) }))));
 
     // If editing an existing submission, load its values for pre-population
     let prefillValues = undefined;
@@ -266,10 +267,11 @@ function renderLiveFormUI(container, formMeta, def, liveFormItemId, prefillValue
 
     return stepSections.map(sec => {
       const visibleFields = sec.fields.filter(field => {
-        // System fields that are purely read-only (Completed, CompletedDate, CompletedBy)
-        // are never rendered as form inputs — they are displayed via the completion panel.
-        // DeptEmail (systemRole "DeptEmail") IS rendered as a normal editable text input.
-        if (field.system && field.systemRole !== "DeptEmail") return false;
+        // All system fields (Completed, CompletedDate, CompletedBy, CompletedComment,
+        // DeptEmail) are managed internally and never rendered as form inputs.
+        // Completion state is shown via the completionPanel below.
+        // DeptEmail is read directly from the SP item in doSectionComplete — not from formValues.
+        if (field.system) return false;
 
         // Check conditions — find ALL conditions that target this field (show when ALL pass)
         const conds = def.conditions?.filter(c => c.showFieldId === field.id) || [];
