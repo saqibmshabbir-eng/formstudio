@@ -1014,7 +1014,15 @@ async function submitLiveForm(liveFormItemId, listName, editItemId) {
       submitFields[colName] = cleanVal;
     }
 
-    // Resolve Person field values via SP ensureUser — collect as { colName: [spId, ...] }
+    // Inject DeptEmail values from the form definition for managerOnly+notify sections.
+    // These are never entered by the user — they come from sec.deptEmail set in the builder.
+    // Written once at submission time so doSectionComplete can read them from the SP item.
+    for (const sec of (def.sections || [])) {
+      if (!sec.managerOnly || !sec.notify || !sec.deptEmail) continue;
+      const deptEmailField = sec.fields.find(f => f.system && f.systemRole === "DeptEmail");
+      const colName = deptEmailField?.internalName || `${sectionKey(sec)}_DeptEmail`;
+      submitFields[colName] = sec.deptEmail;
+    }
     const personFields = {};
     for (const field of allFields) {
       if (field.type !== "User") continue;

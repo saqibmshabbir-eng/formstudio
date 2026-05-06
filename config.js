@@ -112,7 +112,9 @@ const CONFIG = {
   // SharePoint reserved or already-used names on the data list.
   RESERVED_FIELD_NAMES: ["AssignedTo", "AssignedToEmail", "IsDeleted", "Title", "ID", "Status"],
 
-  // Full lifecycle status flow — single list, single flow
+  // Admin-only status actions — defines which action buttons appear in the admin
+  // review table for a form in a given status. Does not cover user-driven transitions
+  // (Created → Submitted → Created) which are hardcoded directly in builder.js.
   STATUS_FLOW: {
     "Created":            [],
     "Submitted":          ["Approve for Preview", "Reject"],
