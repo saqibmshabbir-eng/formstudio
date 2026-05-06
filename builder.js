@@ -507,23 +507,57 @@ function renderSectionBlock(sec, si) {
         <input class="section-title-input" placeholder="Section title (optional)"
           value="${sec.title}"
           oninput="AppState.builderForm.sections[${si}].title=this.value">
-        <span style="color:var(--text3);font-size:12px;">${sec.fields.length} field${sec.fields.length !== 1 ? "s" : ""}</span>
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:${sec.managerOnly ? "var(--accent)" : "var(--text3)"};cursor:pointer;white-space:nowrap;" title="When enabled, submitters cannot see this section — only form managers and admins can view and fill it">
+        <span style="color:var(--text3);font-size:12px;">${sec.fields.filter(f => !f.system).length} field${sec.fields.filter(f => !f.system).length !== 1 ? "s" : ""}</span>
+
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:${sec.managerOnly ? "var(--accent)" : "var(--text3)"};cursor:pointer;white-space:nowrap;"
+          title="When enabled, submitters cannot see this section — only form managers and admins can view and fill it">
           <input type="checkbox" class="toggle" style="width:14px;height:14px;" data-si="${si}"
             ${sec.managerOnly ? "checked" : ""}
             onchange="toggleManagerOnly(+this.dataset.si, this.checked)">
           Managers only
         </label>
+
+        ${safeHtml(sec.managerOnly ? `
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:${sec.notify ? "var(--green,#22c55e)" : "var(--text3)"};cursor:pointer;white-space:nowrap;border-left:1px solid var(--border);padding-left:10px;"
+            title="When enabled, a Notify button appears on this section allowing managers to send an email notification and mark it complete">
+            <input type="checkbox" class="toggle" style="width:14px;height:14px;" data-si="${si}"
+              ${sec.notify ? "checked" : ""}
+              onchange="toggleSectionNotify(+this.dataset.si, this.checked)">
+            Notify
+          </label>
+        ` : "")}
+
+        ${safeHtml(sec.managerOnly && sec.notify ? `
+          <input
+            class="input"
+            style="font-size:12px;padding:4px 8px;height:28px;min-width:220px;flex:1;"
+            placeholder="Notification emails (comma-separated)"
+            value="${escAttr(sec.deptEmail || "")}"
+            title="Comma-separated email addresses notified when this section is marked complete"
+            data-si="${si}"
+            oninput="AppState.builderForm.sections[+this.dataset.si].deptEmail=this.value">
+        ` : "")}
+
         <button class="btn btn-ghost btn-sm btn-icon" data-si="${si}" onclick="removeSection(+this.dataset.si)" aria-label="Remove section">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>
         </button>
       </div>
+
       ${safeHtml(sec.managerOnly ? `
         <div style="padding:6px 14px;background:rgba(79,124,255,0.06);border-bottom:1px solid var(--border);font-size:12px;color:var(--accent);display:flex;align-items:center;gap:6px;">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M7.122.392a1.75 1.75 0 011.756 0l5.25 3.045c.54.313.872.89.872 1.514V8.64c0 2.048-1.19 3.914-3.05 4.856l-2.5 1.286a1.75 1.75 0 01-1.6 0l-2.5-1.286C3.19 12.554 2 10.688 2 8.64V4.951c0-.624.332-1.2.872-1.514L7.122.392z"/></svg>
           This section is only visible to Form Managers and Admins
+          ${sec.notify && sec.deptEmail ? `
+            &nbsp;·&nbsp;
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4l6 5 6-5M2 4h12v9a1 1 0 01-1 1H3a1 1 0 01-1-1V4z"/></svg>
+            Notifies: ${escHtml(sec.deptEmail)}
+          ` : sec.notify ? `
+            &nbsp;·&nbsp;
+            <span style="color:var(--red,#ef4444);">⚠ No notification emails set</span>
+          ` : ""}
         </div>
       ` : "")}
+
       <div class="section-body">
         <div class="field-list" id="fields-${sec.id}">
           ${safeHtml(sec.fields.map((field, fi) => renderFieldItem(field, si, fi)).join(""))}
@@ -593,11 +627,13 @@ function renderFieldItem(field, si, fi) {
 function addSection() {
   const si = AppState.builderForm.sections.length;
   AppState.builderForm.sections.push({
-    id: "s" + Date.now(),
-    title: "",
-    stepIndex: si,  // Default each new section to its own step
+    id:          "s" + Date.now(),
+    title:       "",
+    stepIndex:   si,
     managerOnly: false,
-    fields: []
+    notify:      false,   // whether the section has a Notify/Complete workflow
+    deptEmail:   "",      // comma-separated notification emails
+    fields:      []
   });
   renderStepSections(document.getElementById("wizard-step-content"));
 }
@@ -673,14 +709,38 @@ function toggleManagerOnly(si, checked) {
   section.managerOnly = checked;
 
   if (checked) {
-    // Remove any stale system fields first (idempotent — safe to call twice)
+    // Remove any stale system fields first (idempotent)
     section.fields = section.fields.filter(f => !f.system);
-    // Append the 4 system fields at the end of the section's field list
-    const systemFields = buildSystemFields(section);
-    section.fields.push(...systemFields);
+    // System fields only injected if notify is also on
+    if (section.notify) {
+      section.fields.push(...buildSystemFields(section));
+    }
   } else {
-    // Strip system fields when manager-only is turned off
-    section.fields = section.fields.filter(f => !f.system);
+    // Turning off managerOnly also resets notify — the workflow
+    // makes no sense on a public section
+    section.notify    = false;
+    section.deptEmail = "";
+    section.fields    = section.fields.filter(f => !f.system);
+  }
+
+  renderStepSections(document.getElementById("wizard-step-content"));
+}
+
+// Toggling Notify on a managerOnly section injects or removes the
+// system fields that support the completion workflow.
+function toggleSectionNotify(si, checked) {
+  const section = AppState.builderForm.sections[si];
+  section.notify = checked;
+
+  // Remove stale system fields first regardless of direction
+  section.fields = section.fields.filter(f => !f.system);
+
+  if (checked) {
+    // Inject system fields now that notify is enabled
+    section.fields.push(...buildSystemFields(section));
+  } else {
+    // Turning notify off also clears the email list — no orphaned config
+    section.deptEmail = "";
   }
 
   renderStepSections(document.getElementById("wizard-step-content"));

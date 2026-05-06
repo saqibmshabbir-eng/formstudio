@@ -699,18 +699,12 @@ async function doCreateSharePointList(listName, def, access, authorEmail = null)
     console.warn("AssignedTo column failed:", e.message);
   }
 
-  // ── System columns for Form Manager (managerOnly) sections ──────────────
-  // For every managerOnly section we provision 4 protected columns:
-  //   {key}_DeptEmail      Text     — comma-separated notification emails
-  //   {key}_Completed      Boolean  — has this section been completed?
-  //   {key}_CompletedDate  DateTime — when it was completed
-  //   {key}_CompletedBy    Text     — display name of the completing user
-  //
-  // The key is derived from sectionKey() — first 20 alphanumeric chars of
-  // the section title, with a numeric suffix if two sections clash.
-  // We use the same sectionKey() function defined in utils.js.
-  const managerSections = (def.sections || []).filter(s => s.managerOnly);
-  for (const sec of managerSections) {
+  // ── System columns for Form Manager sections with Notify enabled ────────
+  // Only provisioned when section.notify === true — managerOnly alone is
+  // not sufficient. This keeps lists clean for sections that don't need
+  // a completion workflow.
+  const notifySections = (def.sections || []).filter(s => s.managerOnly && s.notify);
+  for (const sec of notifySections) {
     const key = sectionKey(sec);
     const systemCols = [
       {

@@ -277,10 +277,10 @@ function renderLiveFormUI(container, formMeta, def, liveFormItemId, prefillValue
         return conds.every(cond => evaluateCondition(cond, formValues));
       });
 
-      // For managerOnly sections, check completion state from prefillValues (SP item fields).
-      // prefillValues uses SP internal column names as keys.
+      // For managerOnly sections with notify enabled, check completion state
+      // and render either the Complete button or the completion info panel.
       let completionPanel = "";
-      if (sec.managerOnly && isManager) {
+      if (sec.managerOnly && sec.notify && isManager) {
         const key = sectionKey(sec);
         const completedColName  = `${key}_Completed`;
         const dateColName       = `${key}_CompletedDate`;
