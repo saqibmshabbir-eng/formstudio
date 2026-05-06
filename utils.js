@@ -34,6 +34,17 @@ function getAllFields() {
   return (AppState.builderForm.sections || []).flatMap(s => s.fields || []);
 }
 
+// Derives a SharePoint-safe column prefix from a section title.
+// Strips all non-alphanumeric characters and takes the first 20 chars.
+// Must produce the same value in builder.js, admin.js, and live-form.js
+// so that column names are consistent across provisioning and rendering.
+// Example: "Dept Review & Sign-off" → "DeptReviewSignoff"
+function sectionKey(section) {
+  return (section.title || "Section")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(0, 20) || "Section";
+}
+
 function getAllFieldsFromDef(def) {
   return (def.sections || []).flatMap(s => s.fields || []);
 }
