@@ -38,27 +38,6 @@ function getAllFieldsFromDef(def) {
   return (def.sections || []).flatMap(s => s.fields || []);
 }
 
-// =============================================================
-// SECTION KEY
-// Derives a short, SharePoint-safe prefix from a section title.
-// Used as the column name prefix for the 4 system fields added
-// to every Form Manager (managerOnly) section:
-//   {key}_DeptEmail, {key}_Completed, {key}_CompletedDate, {key}_CompletedBy
-//
-// Rules:
-//   - Strip all non-alphanumeric characters
-//   - Strip any leading digits (SharePoint rule)
-//   - Take the first 20 characters
-//   - Fall back to "Section" if the title reduces to empty
-// =============================================================
-function sectionKey(section) {
-  return (section.title || "Section")
-    .replace(/[^a-zA-Z0-9]/g, "")   // strip spaces and special chars
-    .replace(/^[0-9]+/, "")          // strip any leading digits (SP rule)
-    .slice(0, 20)                    // cap at 20 chars
-    || "Section";                    // fallback if title reduces to empty string
-}
-
 function escHtml(str) {
   if (str == null) return "";
   return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -176,12 +155,24 @@ async function main() {
   await initMsal();
 
   const accounts = msalInstance.getAllAccounts();
-  if (accounts.length) {
-    currentAccount = accounts[0];
-    try { await getToken(); } catch (_) {}
-    await bootApp();
-  } else {
+  if (!accounts.length) {
     render();
+    return;
+  }
+
+  currentAccount = accounts[0];
+  try {
+    // Silent-only on boot — never open a popup without a user gesture, or the
+    // browser will block it and the user will see "popups blocked" with no
+    // obvious recovery. If silent acquisition fails (refresh token expired,
+    // scope change, MFA re-prompt required, etc.), drop the user to the login
+    // screen so their click on "Sign in with Microsoft" provides the gesture
+    // loginPopup needs.
+    await getToken({ allowPopup: false });
+    await bootApp();
+  } catch (_) {
+    currentAccount = null;
+    renderLoginScreen();
   }
 }
 

@@ -48,7 +48,11 @@ function initMsal() {
   return msalInstance.initialize();
 }
 
-async function getToken() {
+// allowPopup: when false, silent failures throw instead of opening a popup.
+// Set false on boot-time calls (no user gesture) so the browser doesn't block
+// the popup; the caller should fall back to the login screen instead, where
+// the user's click on "Sign in" provides the gesture loginPopup needs.
+async function getToken({ allowPopup = true } = {}) {
   const request = { scopes: CONFIG.SCOPES, account: currentAccount };
   try {
     // forceRefresh ensures new scopes (e.g. Sites.Manage.All) are included
@@ -62,6 +66,7 @@ async function getToken() {
       accessToken = result.accessToken;
       return accessToken;
     } catch (e2) {
+      if (!allowPopup) throw e2;
       const result = await msalInstance.acquireTokenPopup(request);
       accessToken = result.accessToken;
       return accessToken;
