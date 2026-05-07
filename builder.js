@@ -96,8 +96,8 @@ function renderWizardStep() {
   }
 }
 
-function wizardNext() {
-  if (!validateCurrentStep()) return;
+async function wizardNext() {
+  if (!await validateCurrentStep()) return;
   AppState.builderStep = Math.min(AppState.builderStep + 1, WIZARD_STEPS.length - 1);
   renderBuilder(document.getElementById("main-content"));
   autoSaveBuilder();
@@ -124,13 +124,30 @@ async function autoSaveBuilder() {
   }
 }
 
-function validateCurrentStep() {
+async function validateCurrentStep() {
   const step = WIZARD_STEPS[AppState.builderStep].key;
   if (step === "identity") {
     const title = document.getElementById("form-title")?.value?.trim();
     if (!title) { showToast("error", "Form Name is required"); return false; }
-    AppState.builderForm.title = title;
+    AppState.builderForm.title    = title;
     AppState.builderForm.listName = generateListName(title);
+
+    // Check for duplicate form title — skip when editing an existing form
+    if (AppState.builderMode !== "edit") {
+      try {
+        const existing = await getListItems(CONFIG.FORMS_LIST);
+        const duplicate = existing.some(i =>
+          i.id !== AppState.builderItemId &&
+          (i.fields?.Title || "").trim().toLowerCase() === title.toLowerCase()
+        );
+        if (duplicate) {
+          showToast("error", `A form called "${title}" already exists. Please choose a different name.`);
+          return false;
+        }
+      } catch (_) {
+        // Non-fatal — if the check fails don't block the author
+      }
+    }
   }
   if (step === "governance") {
     // Capture all governance fields from the DOM into state
@@ -1337,7 +1354,7 @@ function renderStepOnSubmit(container) {
 
         <!-- Notify addresses -->
         <div class="form-group">
-          <label for="onsubmit-notify-emails">Notify these addresses on submission</label>
+          <label for="onsubmit-notify-emails" style="color:var(--text1);font-weight:500;">Notification emails</label>
           <input id="onsubmit-notify-emails" class="input" type="text"
             placeholder="e.g. admin@example.com, team@example.com"
             value="${escAttr(submitNotifyEmails)}"
