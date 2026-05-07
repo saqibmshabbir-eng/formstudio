@@ -196,11 +196,17 @@ async function uploadJsonAttachment(listName, graphItemId, fileName, jsonData) {
   const encoded   = encodeURIComponent(fileName);
   const jsonBytes = new TextEncoder().encode(JSON.stringify(jsonData));
 
-  // Delete existing attachment — SP doesn't support overwrite
+  // Delete existing attachment — SP doesn't support overwrite.
+  // SP REST requires X-HTTP-Method: DELETE and If-Match: * headers.
   try {
     await fetch(`${baseUrl}/getByFileName('${encoded}')`, {
-      method: "DELETE",
-      headers: { Authorization: "Bearer " + token, Accept: "application/json;odata=verbose" },
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + token,
+        Accept: "application/json;odata=verbose",
+        "X-HTTP-Method": "DELETE",
+        "If-Match": "*",
+      },
     });
   } catch (_) {} // 404 = didn't exist — fine
 
