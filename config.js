@@ -121,6 +121,7 @@ const CONFIG = {
     "Preview":            ["Approve", "Reject"],
     "Approved":           [],
     "Live":               [],
+    "Closed":             [],
     "Rejected":           [],
   },
 

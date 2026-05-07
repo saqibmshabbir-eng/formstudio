@@ -227,6 +227,7 @@ function renderAppShell() {
         ${navItem("admin-review", adminIcon(), "Form Requests")}
         ${navItem("new-form", newFormIcon(), "Form Builder")}
         ${isAdmin ? navItem("admin-live", adminIcon(), "Live Forms") : ""}
+        ${isAdmin ? navItem("admin-closed", adminIcon(), "Closed Forms") : ""}
         ` : ""}
       </nav>
 

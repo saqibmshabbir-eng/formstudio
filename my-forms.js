@@ -28,8 +28,8 @@ async function renderMyForms(container) {
       const listName = i.fields?.[CONFIG.COL_LISTNAME] || "";
       const isRetro  = !!i.fields?.[CONFIG.COL_RETRO];
 
-      if (isRetro) return !!listName; // retro: needs a list name to query
-      return (s === "Live" || s === "Preview") && !!listName;
+      if (isRetro) return !!listName;
+      return (s === "Live" || s === "Preview" || s === "Closed") && !!listName;
     });
 
     // For each candidate, fire a $top=1 query against its data list.
@@ -435,11 +435,12 @@ function viewSubmission(submissionId) {
   const hasFileUpload = allFields.some(field => field.type === "FileUpload");
   const listName = _currentFormItem?.fields?.[CONFIG.COL_LISTNAME] || _currentFormDef?.listName || "";
 
-  // Edit button is only shown when the row is currently assigned to the signed-in user.
-  // Use AssignedToEmail (plain text column written by the app) for exact email comparison.
+  // Edit button is only shown when the row is currently assigned to the signed-in user
+  // and the form is not closed — a closed form blocks new writes regardless of assignment.
   const currentEmail  = (AppState.currentUser?.email || "").toLowerCase();
   const assignedEmail = (f[CONFIG.COL_ASSIGNED_TO_EMAIL] || "").toLowerCase();
   const isMine        = !!assignedEmail && assignedEmail === currentEmail;
+  const formIsClosed  = (_currentFormItem?.fields?.[CONFIG.COL_STATUS] || "") === "Closed";
 
   openModal(html`
     <div class="modal-header">
@@ -470,7 +471,7 @@ function viewSubmission(submissionId) {
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal()">Close</button>
-      ${safeHtml(isMine ? html`
+      ${safeHtml(isMine && !formIsClosed ? html`
         <button class="btn btn-secondary" data-id="${submissionId}"
           data-listname="${listName}"
           data-formid="${_currentFormItem.id}"

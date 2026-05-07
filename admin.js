@@ -590,8 +590,8 @@ async function renderAdminLive(container) {
                 <td style="color:var(--text2);font-size:13px;">${accessLabel}</td>
                 <td>
                   <div class="flex gap-2" style="gap:6px;">
-                    <span style="font-size:12px;color:var(--text3);line-height:28px;">Live</span>
-                    <button class="btn btn-sm btn-secondary" data-id="${item.id}" onclick="openSafeEditModal(this.dataset.id)">Edit Details</button>
+                    <button class="btn btn-sm btn-secondary" data-id="${item.id}" onclick="openSafeEditModal(this.dataset.id)">Safe Edit</button>
+                    <button class="btn btn-sm btn-danger" data-id="${item.id}" onclick="closeForm(this.dataset.id)">Close</button>
                   </div>
                 </td>
               </tr>`;
@@ -613,6 +613,95 @@ async function promoteToLive(itemId) {
     renderAdminLive(document.getElementById("main-content"));
   } catch (e) {
     showToast("error", "Failed: " + e.message);
+  }
+}
+
+// =============================================================
+// CLOSE / REOPEN LIVE FORM
+// =============================================================
+async function closeForm(itemId) {
+  try {
+    await updateListItem(CONFIG.FORMS_LIST, itemId, { [CONFIG.COL_STATUS]: "Closed" });
+    showToast("success", "Form closed — no new submissions will be accepted");
+    renderAdminLive(document.getElementById("main-content"));
+  } catch (e) {
+    showToast("error", "Failed to close form: " + e.message);
+  }
+}
+
+async function reopenForm(itemId) {
+  try {
+    await updateListItem(CONFIG.FORMS_LIST, itemId, { [CONFIG.COL_STATUS]: "Live" });
+    showToast("success", "Form reopened — submissions are now accepted");
+    renderAdminClosed(document.getElementById("main-content"));
+  } catch (e) {
+    showToast("error", "Failed to reopen form: " + e.message);
+  }
+}
+
+// =============================================================
+// CLOSED FORMS
+// =============================================================
+async function renderAdminClosed(container) {
+  container.innerHTML = `
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.02em;">Closed Forms</h1>
+        <p style="color:var(--text2);font-size:13.5px;margin-top:2px;">Forms that are paused — data and integrations are intact</p>
+      </div>
+    </div>
+    <div class="card" id="admin-closed-table">
+      <div style="padding:40px;text-align:center;"><span class="spinner"></span></div>
+    </div>
+  `;
+
+  try {
+    const items = await getListItems(CONFIG.FORMS_LIST);
+    const closed = items.filter(i => {
+      const s = i.fields?.[CONFIG.COL_STATUS] || "";
+      return s === "Closed" && !i.fields?.[CONFIG.COL_RETRO];
+    });
+    const card = document.getElementById("admin-closed-table");
+
+    if (!closed.length) {
+      card.innerHTML = `<div class="empty-state"><h3>No closed forms</h3><p style="color:var(--text2)">Forms you close will appear here.</p></div>`;
+      return;
+    }
+
+    // Load definitions in parallel for access info
+    const defs = await Promise.all(closed.map(async item => {
+      try { return await getFormDefinition(CONFIG.FORMS_LIST, item.id); }
+      catch (_) { return null; }
+    }));
+
+    card.innerHTML = html`
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Form</th><th>List Name</th><th>Access</th><th>Actions</th></tr></thead>
+          <tbody>
+            ${safeHtml(closed.map((item, idx) => {
+              const f = item.fields || {};
+              const def = defs[idx];
+              const accessLabel = CONFIG.ACCESS_OPTIONS.find(a => a.value === def?.access)?.label || def?.access || "—";
+              return html`<tr>
+                <td><strong>${f.Title || "—"}</strong></td>
+                <td><span style="font-family:var(--mono);font-size:12px;color:var(--text2)">${f[CONFIG.COL_LISTNAME] || "—"}</span></td>
+                <td style="color:var(--text2);font-size:13px;">${accessLabel}</td>
+                <td>
+                  <div class="flex gap-2" style="gap:6px;">
+                    <button class="btn btn-sm btn-secondary" data-id="${item.id}" onclick="openSafeEditModal(this.dataset.id)">Safe Edit</button>
+                    <button class="btn btn-sm btn-primary" data-id="${item.id}" onclick="reopenForm(this.dataset.id)">Reopen</button>
+                  </div>
+                </td>
+              </tr>`;
+            }).join(""))}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch (e) {
+    document.getElementById("admin-closed-table").innerHTML =
+      `<div class="empty-state"><p style="color:var(--red)">Error: ${escHtml(e.message)}</p></div>`;
   }
 }
 

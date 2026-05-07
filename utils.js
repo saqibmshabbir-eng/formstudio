@@ -105,6 +105,7 @@ function statusBadge(status) {
     "Approved":  "badge-green",
     "Rejected":  "badge-red",
     "Live":      "badge-green",
+    "Closed":    "badge-gray",
   };
   return `<span class="badge ${map[status]||"badge-gray"}">${escHtml(status)}</span>`;
 }

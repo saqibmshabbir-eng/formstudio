@@ -119,6 +119,19 @@ async function openLiveForm(itemId, editItemId) {
     const def = await getFormDefinition(CONFIG.FORMS_LIST, itemId);
     if (!def) throw new Error("Form definition not found. Ensure the FormDefinition column exists on the Forms list.");
 
+    // Guard: Closed forms are not accessible to regular users
+    if ((f[CONFIG.COL_STATUS] || f.Status) === "Closed") {
+      main.innerHTML = `
+        <div class="empty-state">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+          <h3 style="margin-top:16px;">This form is currently closed</h3>
+          <p style="color:var(--text2);margin-top:6px;">It is not currently accepting submissions. Please check back later.</p>
+          <button class="btn btn-secondary mt-4" onclick="navigateTo('home')" style="margin-top:16px;">← Back to Home</button>
+        </div>
+      `;
+      return;
+    }
+
     // If editing an existing submission, load its values for pre-population
     let prefillValues = undefined;
     if (editItemId) {
@@ -349,6 +362,7 @@ function renderLiveFormUI(container, formMeta, def, liveFormItemId, prefillValue
   function update() {
     document.getElementById("live-form-body").innerHTML = renderCurrentStep();
     attachLiveFieldListeners(def, formValues, update);
+    initChoiceSearchDropdowns();
     updateStepIndicator();
   }
 
@@ -454,7 +468,7 @@ function renderLiveField(field, formValues, def) {
       }
       return `<div class="form-group preview-field">
         <label class="preview-label">${escHtml(field.label)}${field.required?'<span class="req">*</span>':""}</label>
-        <select class="select" data-field-id="${field.id}">
+        <select class="select" data-field-id="${field.id}" data-choice-search="1" data-current-val="${escAttr(val)}">
           <option value="">Select an option</option>
           ${choices.map(c => `<option value="${escAttr(c)}" ${val===c?"selected":""}>${escHtml(c)}</option>`).join("")}
         </select>
@@ -773,6 +787,50 @@ function attachLiveFieldListeners(def, formValues, update) {
         if (needsRerender(id)) update();
       });
     }
+  });
+}
+
+// =============================================================
+// SEARCHABLE CHOICE DROPDOWNS (Tom Select)
+// Initialises a type-to-filter combobox on every Choice <select>
+// after the form body is rendered. Called from update() each time
+// the form re-renders. Tom Select is destroyed before re-init so
+// re-renders (triggered by dependent dropdowns / conditions) are safe.
+// The native <select> + its change listener remain untouched, so
+// formValues, validation, and submission code need no changes.
+// =============================================================
+function initChoiceSearchDropdowns() {
+  // Guard: if Tom Select didn't load (e.g. CDN blocked), do nothing.
+  if (typeof TomSelect === "undefined") return;
+
+  document.querySelectorAll("select[data-choice-search]").forEach(el => {
+    // Destroy any previous instance on this element (safe after re-render).
+    if (el.tomselect) {
+      el.tomselect.destroy();
+    }
+
+    // Only activate Tom Select when there are enough options to warrant search.
+    // Below this threshold a plain native select is perfectly usable.
+    const SEARCH_THRESHOLD = 10;
+    const optionCount = el.options.length - 1; // subtract the blank placeholder
+    if (optionCount < SEARCH_THRESHOLD) return;
+
+    new TomSelect(el, {
+      // Allow the user to clear their selection by picking the blank option.
+      allowEmptyOption: true,
+      // Show a placeholder when nothing is selected.
+      placeholder: "Type to search…",
+      // Don't allow arbitrary values — only items from the choices list.
+      create: false,
+      // Render at most 200 items at a time for performance with 1000-row lists.
+      maxOptions: 200,
+      // Search against the option text (label), not the value (they're the same
+      // for Choice fields, but being explicit avoids surprises).
+      searchField: ["text"],
+      // Keep the dropdown in the DOM flow rather than appended to <body> so that
+      // it inherits the form's z-index stacking context correctly.
+      dropdownParent: null,
+    });
   });
 }
 
