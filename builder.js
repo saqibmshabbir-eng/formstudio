@@ -1633,6 +1633,8 @@ async function saveBuilderDraft() {
       specificPeople: form.specificPeople,
       formManagers: form.formManagers,
       submissionType: form.submissionType,
+      submitNotifyEmails: form.submitNotifyEmails || "",
+      notifySubmitter:    form.notifySubmitter !== false,
       conditions: form.conditions,
       dependentDropdowns: form.dependentDropdowns,
       governance: form.governance,
