@@ -153,30 +153,108 @@ async function updateListItem(listName, itemId, fields) {
   return graphPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, fields);
 }
 
-// ── JSON Definition Storage ──────────────────────────────────────────────────
-// Form definitions are stored as JSON in the FormDefinition column of the
-// Forms list. All form lifecycle stages live in this one list.
-// ─────────────────────────────────────────────────────────────────────────────
-
-// Save JSON definition into the Forms list item
-async function uploadJsonAttachment(listName, itemId, fileName, jsonData) {
-  const siteId = await getSiteId();
-  const listId = await getListId(listName);
-  const json   = JSON.stringify(jsonData);
-  await graphPatch(
-    `/sites/${siteId}/lists/${listId}/items/${itemId}/fields`,
-    { [CONFIG.COL_FORM_DEF]: json }
-  );
+// POST a file (binary/text) to SharePoint REST API
+async function spPut(relUrl, body) {
+  const token = await getSpToken();
+  const url = CONFIG.SITE_URL.replace(/\/$/, "") + relUrl;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + token,
+      Accept: "application/json;odata=verbose",
+      "Content-Type": "application/octet-stream",
+    },
+    body,
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`SP PUT ${res.status} on ${relUrl}: ${txt.slice(0, 300)}`);
+  }
+  return res.json().catch(() => ({}));
 }
 
-// Read JSON definition from a Forms list item
+// ── JSON Definition Storage ──────────────────────────────────────────────────
+// Form definitions are stored as a JSON file attachment on the Forms list item.
+// SP list item attachments are used rather than a column value because the JSON
+// can grow very large (e.g. dropdowns with 1000+ entries) and would exceed the
+// SharePoint column size limit (~64KB).
+//
+// The attachment filename is always "form-definition.json".
+// getFormDefinition falls back to the legacy FormDefinition column for forms
+// saved before this migration — so existing forms continue to work.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Save JSON definition as a file attachment on the Forms list item.
+// Deletes any existing "form-definition.json" attachment first (SP returns 409
+// Conflict if you try to add a duplicate filename).
+async function uploadJsonAttachment(listName, graphItemId, fileName, jsonData) {
+  const spItemId  = await getSpItemId(listName, graphItemId);
+  const siteUrl   = CONFIG.SITE_URL.replace(/\/$/, "");
+  const token     = await getSpToken();
+  const baseUrl   = `${siteUrl}/_api/web/lists/GetByTitle('${encodeURIComponent(listName)}')/items(${spItemId})/AttachmentFiles`;
+  const encoded   = encodeURIComponent(fileName);
+  const jsonBytes = new TextEncoder().encode(JSON.stringify(jsonData));
+
+  // Delete existing attachment — SP doesn't support overwrite
+  try {
+    await fetch(`${baseUrl}/getByFileName('${encoded}')`, {
+      method: "DELETE",
+      headers: { Authorization: "Bearer " + token, Accept: "application/json;odata=verbose" },
+    });
+  } catch (_) {} // 404 = didn't exist — fine
+
+  // Upload new attachment
+  const res = await fetch(`${baseUrl}/add(FileName='${encoded}')`, {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + token,
+      Accept: "application/json;odata=verbose",
+      "Content-Type": "application/octet-stream",
+    },
+    body: jsonBytes,
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`Definition upload failed: ${res.status} — ${txt.slice(0, 200)}`);
+  }
+
+  // Clear the legacy column value to free space — not critical if it fails
+  try {
+    const siteId = await getSiteId();
+    const listId = await getListId(listName);
+    await graphPatch(`/sites/${siteId}/lists/${listId}/items/${graphItemId}/fields`, {
+      [CONFIG.COL_FORM_DEF]: "",
+    });
+  } catch (_) {}
+}
+
+// Read JSON definition — tries the attachment first, falls back to the legacy
+// FormDefinition column for forms saved before the attachment migration.
 async function getFormDefinition(listName, itemId) {
-  const siteId = await getSiteId();
-  const listId = await getListId(listName);
-  const item   = await graphGet(`/sites/${siteId}/lists/${listId}/items/${itemId}?expand=fields`);
-  const raw    = item?.fields?.[CONFIG.COL_FORM_DEF];
-  if (!raw) return null;
-  try { return JSON.parse(raw); } catch (_) { return null; }
+  // ── Try attachment first ──────────────────────────────────────
+  try {
+    const spItemId = await getSpItemId(listName, itemId);
+    const siteUrl  = CONFIG.SITE_URL.replace(/\/$/, "");
+    const token    = await getSpToken();
+    const res = await fetch(
+      `${siteUrl}/_api/web/lists/GetByTitle('${encodeURIComponent(listName)}')/items(${spItemId})/AttachmentFiles/getByFileName('form-definition.json')/$value`,
+      { headers: { Authorization: "Bearer " + token, Accept: "application/json" } }
+    );
+    if (res.ok) {
+      const text = await res.text();
+      try { return JSON.parse(text); } catch (_) {}
+    }
+  } catch (_) {}
+
+  // ── Fall back to legacy column ────────────────────────────────
+  try {
+    const siteId = await getSiteId();
+    const listId = await getListId(listName);
+    const item   = await graphGet(`/sites/${siteId}/lists/${listId}/items/${itemId}?expand=fields`);
+    const raw    = item?.fields?.[CONFIG.COL_FORM_DEF];
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (_) { return null; }
 }
 
 // ── SharePoint REST API Helpers ───────────────────────────────────────────────
