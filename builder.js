@@ -453,7 +453,7 @@ function renderSectionBlock(sec, si) {
   // Build sub-sections as plain strings to avoid nested template escaping issues
 
   const notifyToggle = sec.managerOnly ? `
-    <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:${sec.notify ? "var(--accent)" : "var(--text3)"};cursor:pointer;white-space:nowrap;border-left:1px solid var(--border);padding-left:10px;"
+    <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:${sec.notify ? "var(--accent)" : "var(--text2)"};cursor:pointer;white-space:nowrap;border-left:1px solid var(--border);padding-left:10px;font-weight:${sec.notify ? "600" : "500"};"
       title="When enabled, managers can mark this section complete and notify a team by email">
       <input type="checkbox" style="width:13px;height:13px;cursor:pointer;accent-color:var(--accent);" data-si="${si}"
         ${sec.notify ? "checked" : ""}
@@ -464,8 +464,8 @@ function renderSectionBlock(sec, si) {
 
   const notifyRow = (sec.managerOnly && sec.notify) ? `
     <div class="section-notify-row">
-      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--text3)" stroke-width="1.5"><path d="M2 4l6 5 6-5M2 4h12v9a1 1 0 01-1 1H3a1 1 0 01-1-1V4z"/></svg>
-      <label style="font-size:12px;color:var(--text3);white-space:nowrap;">Notification emails:</label>
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M2 4l6 5 6-5M2 4h12v9a1 1 0 01-1 1H3a1 1 0 01-1-1V4z"/></svg>
+      <label style="font-size:12px;color:var(--text1);font-weight:600;white-space:nowrap;">Notification emails:</label>
       <input
         class="input"
         style="font-size:12px;padding:4px 8px;height:28px;flex:1;"
