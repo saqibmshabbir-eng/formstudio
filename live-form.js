@@ -1208,7 +1208,6 @@ function buildEmailFieldTable(visibleFields, values) {
 
   return `<table cellpadding="0" cellspacing="0" border="0" width="100%">${rows}</table>`;
 }
-}
 
 // Builds a section fields table from raw SP item fields (used in section complete email).
 // Maps internalName → label from the section definition.
@@ -1247,7 +1246,6 @@ function buildEmailSectionTable(section, spFields) {
   if (!rows.trim()) return `<p style="color:#888;font-size:13px;margin:0;font-family:Arial,sans-serif;">No responses recorded.</p>`;
 
   return `<table cellpadding="0" cellspacing="0" border="0" width="100%">${rows}</table>`;
-}
 }
 
 // =============================================================
