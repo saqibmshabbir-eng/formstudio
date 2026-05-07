@@ -1091,6 +1091,10 @@ async function submitLiveForm(liveFormItemId, listName, editItemId) {
           await uploadFormAttachment(listName, spItemId, file, false);
         }
       }
+
+      // ── On Submit emails ─────────────────────────────────────────
+      await sendOnSubmitEmails(state.def, state.formValues, allFields, fieldColNames);
+
       hideProgress();
       showToast("success", "Form submitted successfully!");
     }
@@ -1099,6 +1103,243 @@ async function submitLiveForm(liveFormItemId, listName, editItemId) {
     hideProgress();
     showToast("error", `${isEdit ? "Save" : "Submit"} failed: ` + e.message);
     if (btn) { btn.disabled = false; btn.innerHTML = isEdit ? "Save Changes" : "Submit"; }
+  }
+}
+
+// =============================================================
+// EMAIL HELPERS
+// Shared branded email template for all Form Studio emails.
+// UoL colours: navy #002147, purple #7B2D8B, gold #CFB53B
+// All emails use inline styles only — email clients strip <style> blocks.
+// =============================================================
+
+function buildEmailHtml({ headerLabel, bodyHtml, footerSentBy }) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f0f2f5;font-family:'Segoe UI',Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f2f5;padding:32px 0;">
+  <tr><td align="center">
+    <table width="620" cellpadding="0" cellspacing="0" style="max-width:620px;width:100%;">
+
+      <!-- Header -->
+      <tr>
+        <td style="background:#002147;border-radius:8px 8px 0 0;padding:28px 36px 24px;">
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td>
+                <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#CFB53B;margin-bottom:6px;">University of Leicester</div>
+                <div style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.02em;">Form Studio</div>
+              </td>
+              <td align="right" valign="middle">
+                <div style="background:#7B2D8B;color:#fff;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;padding:5px 12px;border-radius:20px;">${escHtml(headerLabel)}</div>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+
+      <!-- Purple accent strip -->
+      <tr><td style="height:4px;background:linear-gradient(90deg,#7B2D8B,#002147);"></td></tr>
+
+      <!-- Body card -->
+      <tr>
+        <td style="background:#ffffff;padding:32px 36px;border-radius:0 0 8px 8px;border:1px solid #e4e7eb;border-top:none;">
+          ${bodyHtml}
+
+          <!-- Footer -->
+          <div style="margin-top:36px;padding-top:20px;border-top:1px solid #f0f0f0;">
+            <p style="margin:0;font-size:11px;color:#aaa;line-height:1.6;">
+              Sent by <strong style="color:#002147;">Form Studio</strong> on behalf of ${escHtml(footerSentBy)}.<br>
+              University of Leicester · University Road · Leicester · LE1 7RH
+            </p>
+          </div>
+        </td>
+      </tr>
+
+    </table>
+  </td></tr>
+</table>
+</body></html>`;
+}
+
+// Builds a clean two-column field/value table for use in emails.
+// Skips system fields, InfoText, and empty values.
+function buildEmailFieldTable(visibleFields, values) {
+  const rows = visibleFields
+    .filter(f => !f.system && f.type !== "InfoText")
+    .map(f => {
+      const val = values[f.id];
+      let display = "";
+      if (val === undefined || val === null || val === "") {
+        return ""; // skip empty
+      } else if (Array.isArray(val)) {
+        display = escHtml(val.map(v => (typeof v === "object" ? v.displayName || v.email || "" : String(v))).join(", "));
+      } else if (typeof val === "object" && val.displayName) {
+        display = escHtml(val.displayName);
+      } else if (typeof val === "boolean") {
+        display = val ? "Yes" : "No";
+      } else {
+        display = escHtml(String(val));
+      }
+      return `
+        <tr>
+          <td style="padding:10px 14px;font-size:12px;font-weight:600;letter-spacing:0.03em;color:#6b7280;text-transform:uppercase;white-space:nowrap;vertical-align:top;border-bottom:1px solid #f3f4f6;width:38%;">${escHtml(f.label)}</td>
+          <td style="padding:10px 14px;font-size:14px;color:#1a1a1a;vertical-align:top;border-bottom:1px solid #f3f4f6;">${display}</td>
+        </tr>`;
+    }).join("");
+
+  if (!rows.trim()) return `<p style="color:#888;font-size:13px;margin:0;">No responses recorded.</p>`;
+
+  return `
+    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-radius:6px;overflow:hidden;border:1px solid #e5e7eb;">
+      <thead>
+        <tr style="background:#f8f9fb;">
+          <th style="padding:10px 14px;text-align:left;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9ca3af;border-bottom:2px solid #e5e7eb;">Field</th>
+          <th style="padding:10px 14px;text-align:left;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9ca3af;border-bottom:2px solid #e5e7eb;">Response</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+// Builds a section fields table from raw SP item fields (used in section complete email).
+// Maps internalName → label from the section definition.
+function buildEmailSectionTable(section, spFields) {
+  const userFields = (section.fields || []).filter(f => !f.system && f.type !== "InfoText");
+  if (!userFields.length) return `<p style="color:#888;font-size:13px;margin:0;">No fields in this section.</p>`;
+
+  const rows = userFields.map(f => {
+    const colName = f.internalName || f.label;
+    const raw = spFields?.[colName];
+    let display = "";
+    if (raw === undefined || raw === null || raw === "" || raw === false) {
+      return "";
+    } else if (Array.isArray(raw)) {
+      display = escHtml(raw.map(v => (typeof v === "object" ? v.LookupValue || v.displayName || "" : String(v))).join(", "));
+    } else if (typeof raw === "object") {
+      display = escHtml(raw.LookupValue || raw.displayName || raw.Email || JSON.stringify(raw));
+    } else if (typeof raw === "boolean") {
+      display = raw ? "Yes" : "No";
+    } else {
+      display = escHtml(String(raw));
+    }
+    return `
+      <tr>
+        <td style="padding:10px 14px;font-size:12px;font-weight:600;letter-spacing:0.03em;color:#6b7280;text-transform:uppercase;white-space:nowrap;vertical-align:top;border-bottom:1px solid #f3f4f6;width:38%;">${escHtml(f.label)}</td>
+        <td style="padding:10px 14px;font-size:14px;color:#1a1a1a;vertical-align:top;border-bottom:1px solid #f3f4f6;">${display}</td>
+      </tr>`;
+  }).join("");
+
+  if (!rows.trim()) return `<p style="color:#888;font-size:13px;margin:0;">No responses recorded.</p>`;
+
+  return `
+    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-radius:6px;overflow:hidden;border:1px solid #e5e7eb;">
+      <thead>
+        <tr style="background:#f8f9fb;">
+          <th style="padding:10px 14px;text-align:left;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9ca3af;border-bottom:2px solid #e5e7eb;">Field</th>
+          <th style="padding:10px 14px;text-align:left;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9ca3af;border-bottom:2px solid #e5e7eb;">Response</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+// =============================================================
+// ON SUBMIT EMAILS
+// Fires after a new submission is created. Sends:
+//   1) A notification to submitNotifyEmails (if set)
+//   2) A read-only HTML confirmation to the submitter (if notifySubmitter is true)
+// System fields are excluded from both emails.
+// =============================================================
+async function sendOnSubmitEmails(def, formValues, allFields, fieldColNames) {
+  if (!def) return;
+
+  const submitterEmail  = AppState.currentUser?.email;
+  const submitterName   = AppState.currentUser?.displayName || submitterEmail || "Submitter";
+  const formTitle       = def.title || "Form";
+  const notifyEmails    = (def.submitNotifyEmails || "")
+    .split(",").map(e => e.trim()).filter(e => e.includes("@"));
+  const notifySubmitter = def.notifySubmitter !== false;
+
+  if (!notifyEmails.length && !notifySubmitter) return;
+
+  const visibleFields = allFields.filter(f => !f.system && f.type !== "InfoText");
+  const now = new Date().toLocaleString("en-GB", {
+    day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit"
+  });
+
+  const fieldTable = buildEmailFieldTable(visibleFields, formValues);
+
+  // ── 1) Notify addresses ──────────────────────────────────────
+  if (notifyEmails.length) {
+    const bodyHtml = `
+      <h2 style="margin:0 0 6px;font-size:20px;font-weight:700;color:#002147;">${escHtml(formTitle)}</h2>
+      <p style="margin:0 0 24px;font-size:13px;color:#6b7280;">New submission received</p>
+
+      <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+        <tr>
+          <td style="padding:12px 16px;background:#f8f9fb;border-radius:6px;border:1px solid #e5e7eb;">
+            <span style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;">Submitted by</span><br>
+            <span style="font-size:15px;font-weight:600;color:#002147;">${escHtml(submitterName)}</span>
+            ${submitterEmail ? `<span style="font-size:13px;color:#888;margin-left:8px;">${escHtml(submitterEmail)}</span>` : ""}
+          </td>
+          <td width="16"></td>
+          <td style="padding:12px 16px;background:#f8f9fb;border-radius:6px;border:1px solid #e5e7eb;">
+            <span style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;">Submitted at</span><br>
+            <span style="font-size:15px;font-weight:600;color:#002147;">${now}</span>
+          </td>
+        </tr>
+      </table>
+
+      <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#7B2D8B;margin-bottom:10px;">Submission Details</div>
+      ${fieldTable}`;
+
+    try {
+      await graphPost(`/me/sendMail`, {
+        message: {
+          subject: `[Form Studio] New submission — ${formTitle}`,
+          body: { contentType: "HTML", content: buildEmailHtml({
+            headerLabel: "New Submission",
+            bodyHtml,
+            footerSentBy: submitterName,
+          })},
+          toRecipients: notifyEmails.map(e => ({ emailAddress: { address: e } })),
+        },
+        saveToSentItems: false,
+      });
+    } catch (e) {
+      console.warn("[sendOnSubmitEmails] notify failed:", e.message);
+    }
+  }
+
+  // ── 2) Submitter confirmation ────────────────────────────────
+  if (notifySubmitter && submitterEmail) {
+    const bodyHtml = `
+      <h2 style="margin:0 0 6px;font-size:20px;font-weight:700;color:#002147;">${escHtml(formTitle)}</h2>
+      <p style="margin:0 0 4px;font-size:15px;color:#374151;">Thank you, <strong>${escHtml(submitterName)}</strong>.</p>
+      <p style="margin:0 0 24px;font-size:13px;color:#6b7280;">Your form was submitted on ${now}. This is a read-only copy for your records.</p>
+
+      <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#7B2D8B;margin-bottom:10px;">Your Responses</div>
+      ${fieldTable}`;
+
+    try {
+      await graphPost(`/me/sendMail`, {
+        message: {
+          subject: `[Form Studio] Submission confirmed — ${formTitle}`,
+          body: { contentType: "HTML", content: buildEmailHtml({
+            headerLabel: "Submission Confirmed",
+            bodyHtml,
+            footerSentBy: "Form Studio",
+          })},
+          toRecipients: [{ emailAddress: { address: submitterEmail } }],
+        },
+        saveToSentItems: false,
+      });
+    } catch (e) {
+      console.warn("[sendOnSubmitEmails] submitter confirmation failed:", e.message);
+    }
   }
 }
 
@@ -1200,63 +1441,77 @@ async function doSectionComplete(btn) {
       .filter(e => e.includes("@"));
 
     if (recipients.length) {
-      // Build the deep links
       const appUrl      = (CONFIG.APP_URL || "").replace(/\/$/, "");
       const formId      = state.liveFormItemId;
       const openThisUrl = `${appUrl}?view=my-forms&formId=${encodeURIComponent(formId)}&itemId=${encodeURIComponent(itemId)}`;
       const openAllUrl  = `${appUrl}?view=my-forms&formId=${encodeURIComponent(formId)}`;
+      const formTitle   = formMeta.Title || def.title || "Form";
+      const sectionTitle = section.title || key;
+      const completedAt  = new Date(now).toLocaleString("en-GB", {
+        day: "2-digit", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit"
+      });
 
-      const formTitle    = escHtml(formMeta.Title || def.title || "Form");
-      const sectionTitle = escHtml(section.title || key);
+      // Build section field table from the re-fetched SP item
+      const sectionTable = buildEmailSectionTable(section, spItem?.fields || {});
 
-      // HTML email body
-      const emailBody = `
-        <div style="font-family:sans-serif;font-size:14px;color:#1a1a1a;max-width:600px;">
-          <h2 style="font-size:18px;font-weight:600;margin-bottom:8px;">
-            ${formTitle} — ${sectionTitle} Completed
-          </h2>
-          <p style="color:#555;margin-bottom:16px;">
-            <strong>${escHtml(displayName)}</strong> has marked the
-            <strong>${sectionTitle}</strong> section as complete.
-          </p>
-          ${comment ? `
-          <div style="background:#f4f4f2;border-left:3px solid #888;padding:12px 16px;border-radius:4px;margin-bottom:20px;">
-            <p style="margin:0;color:#333;font-style:italic;">"${escHtml(comment)}"</p>
-          </div>` : ""}
-          <div style="margin-bottom:8px;">
-            <strong>Completed by:</strong> ${escHtml(displayName)}<br>
-            <strong>Date:</strong> ${new Date(now).toLocaleString("en-GB", {
-              day: "2-digit", month: "short", year: "numeric",
-              hour: "2-digit", minute: "2-digit"
-            })}
-          </div>
-          <div style="margin-top:24px;display:flex;gap:12px;">
-            <a href="${openThisUrl}"
-              style="display:inline-block;padding:10px 20px;background:#002147;color:#fff;text-decoration:none;border-radius:5px;font-weight:600;">
-              Open This Form
-            </a>
-            <a href="${openAllUrl}"
-              style="display:inline-block;padding:10px 20px;background:#f4f4f2;color:#002147;text-decoration:none;border-radius:5px;font-weight:600;border:1px solid #ddd;">
-              Open All Forms
-            </a>
-          </div>
-          <p style="margin-top:24px;font-size:12px;color:#aaa;">
-            Sent by Form Studio on behalf of ${escHtml(displayName)}
-          </p>
-        </div>
-      `;
+      const bodyHtml = `
+        <h2 style="margin:0 0 6px;font-size:20px;font-weight:700;color:#002147;">${escHtml(formTitle)}</h2>
+        <p style="margin:0 0 24px;font-size:13px;color:#6b7280;">Section completed</p>
 
-      // Send via Graph /me/sendMail — fires as the logged-in user
+        <!-- Completion meta -->
+        <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+          <tr>
+            <td style="padding:12px 16px;background:#f8f9fb;border-radius:6px;border:1px solid #e5e7eb;">
+              <span style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;">Section</span><br>
+              <span style="font-size:15px;font-weight:600;color:#002147;">${escHtml(sectionTitle)}</span>
+            </td>
+            <td width="16"></td>
+            <td style="padding:12px 16px;background:#f8f9fb;border-radius:6px;border:1px solid #e5e7eb;">
+              <span style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;">Completed by</span><br>
+              <span style="font-size:15px;font-weight:600;color:#002147;">${escHtml(displayName)}</span>
+            </td>
+            <td width="16"></td>
+            <td style="padding:12px 16px;background:#f8f9fb;border-radius:6px;border:1px solid #e5e7eb;">
+              <span style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;">Completed at</span><br>
+              <span style="font-size:15px;font-weight:600;color:#002147;">${completedAt}</span>
+            </td>
+          </tr>
+        </table>
+
+        ${comment ? `
+        <!-- Comment -->
+        <div style="background:#faf5ff;border-left:3px solid #7B2D8B;padding:14px 18px;border-radius:0 6px 6px 0;margin-bottom:24px;">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#7B2D8B;margin-bottom:6px;">Comment</div>
+          <p style="margin:0;font-size:14px;color:#374151;font-style:italic;">"${escHtml(comment)}"</p>
+        </div>` : ""}
+
+        <!-- Section fields -->
+        <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#7B2D8B;margin-bottom:10px;">Section Responses</div>
+        ${sectionTable}
+
+        <!-- CTA buttons -->
+        <table cellpadding="0" cellspacing="0" style="margin-top:28px;">
+          <tr>
+            <td>
+              <a href="${openThisUrl}" style="display:inline-block;padding:11px 22px;background:#002147;color:#ffffff;text-decoration:none;border-radius:6px;font-size:13px;font-weight:600;letter-spacing:0.02em;">Open This Submission</a>
+            </td>
+            <td width="12"></td>
+            <td>
+              <a href="${openAllUrl}" style="display:inline-block;padding:11px 22px;background:#ffffff;color:#002147;text-decoration:none;border-radius:6px;font-size:13px;font-weight:600;letter-spacing:0.02em;border:1px solid #d1d5db;">View All Submissions</a>
+            </td>
+          </tr>
+        </table>`;
+
       await graphPost(`/me/sendMail`, {
         message: {
-          subject: `[Form Studio] ${formMeta.Title || def.title || "Form"} — ${section.title || key} Completed`,
-          body: {
-            contentType: "HTML",
-            content: emailBody,
-          },
-          toRecipients: recipients.map(email => ({
-            emailAddress: { address: email }
-          })),
+          subject: `[Form Studio] ${formTitle} — ${sectionTitle} completed`,
+          body: { contentType: "HTML", content: buildEmailHtml({
+            headerLabel: "Section Complete",
+            bodyHtml,
+            footerSentBy: displayName,
+          })},
+          toRecipients: recipients.map(email => ({ emailAddress: { address: email } })),
         },
         saveToSentItems: false,
       });

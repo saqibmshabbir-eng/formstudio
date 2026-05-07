@@ -22,6 +22,8 @@ const AppState = {
     specificPeople: [],         // [{id, displayName, email}]
     formManagers: [],           // [{id, displayName, email}] — colleagues who can manage submissions
     submissionType: "Submit",
+    submitNotifyEmails: "",   // comma-separated — notified when any user submits
+    notifySubmitter:    true, // send submitter a read-only HTML confirmation email
     conditions: [],             // [{showFieldId, whenFieldId, equalsValue}]
     dependentDropdowns: [],     // [{childFieldId, parentFieldId, mapping: {parentVal: [childVals]}}]
     governance: {
@@ -54,7 +56,9 @@ function resetBuilderForm() {
     access: "StaffStudents",
     specificPeople: [],
     formManagers: [],
-    submissionType: "Submit",
+    submissionType:     "Submit",
+    submitNotifyEmails: "",   // comma-separated — notified when any user submits
+    notifySubmitter:    true, // send submitter a read-only HTML confirmation email
     conditions: [],
     dependentDropdowns: [],
     governance: {

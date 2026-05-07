@@ -15,6 +15,7 @@ const WIZARD_STEPS = [
   { key: "dependents",    label: "Linked Dropdowns" },
   { key: "layout",        label: "Layout" },
   { key: "access",        label: "Access" },
+  { key: "onsubmit",      label: "On Submit" },
   { key: "review",        label: "Review" },
 ];
 
@@ -90,6 +91,7 @@ function renderWizardStep() {
     case "dependents":  renderStepDependents(container); break;
     case "layout":      renderStepLayout(container); break;
     case "access":      renderStepAccess(container); break;
+    case "onsubmit":    renderStepOnSubmit(container); break;
     case "review":      renderStepReview(container); break;
   }
 }
@@ -166,6 +168,19 @@ function validateCurrentStep() {
         }
       }
     }
+  }
+  if (step === "onsubmit") {
+    const emails = document.getElementById("onsubmit-notify-emails")?.value?.trim() || "";
+    // Validate each entry is a plausible email address
+    if (emails) {
+      const invalid = emails.split(",").map(e => e.trim()).filter(e => e && !e.includes("@"));
+      if (invalid.length) {
+        showToast("error", `Invalid email address: "${invalid[0]}"`);
+        return false;
+      }
+    }
+    AppState.builderForm.submitNotifyEmails = emails;
+    AppState.builderForm.notifySubmitter    = document.getElementById("onsubmit-notify-submitter")?.checked ?? true;
   }
   return true;
 }
@@ -1294,8 +1309,51 @@ function addPerson(id, displayName, email) {
   }
   renderStepAccess(document.getElementById("wizard-step-content"));
 }
+function renderStepOnSubmit(container) {
+  const { submitNotifyEmails, notifySubmitter } = AppState.builderForm;
+  container.innerHTML = html`
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">On Submit</div>
+          <div class="card-subtitle">Configure what happens when a user submits this form</div>
+        </div>
+      </div>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:24px;">
+
+        <!-- Submitter confirmation -->
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-weight:500;">
+            <input type="checkbox" id="onsubmit-notify-submitter"
+              style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer;"
+              ${notifySubmitter ? "checked" : ""}
+              onchange="AppState.builderForm.notifySubmitter = this.checked">
+            Send submitter a confirmation email
+          </label>
+          <div style="font-size:12.5px;color:var(--text2);margin-top:4px;padding-left:25px;">
+            The submitter receives a read-only HTML summary of their submission. System fields are excluded.
+          </div>
+        </div>
+
+        <!-- Notify addresses -->
+        <div class="form-group">
+          <label for="onsubmit-notify-emails">Notify these addresses on submission</label>
+          <input id="onsubmit-notify-emails" class="input" type="text"
+            placeholder="e.g. admin@example.com, team@example.com"
+            value="${escAttr(submitNotifyEmails)}"
+            oninput="AppState.builderForm.submitNotifyEmails = this.value.trim()">
+          <div style="font-size:12px;color:var(--text3);margin-top:4px;">
+            Comma-separated. Leave blank to skip. These addresses are notified every time the form is submitted.
+          </div>
+        </div>
+
+      </div>
+    </div>
+  `;
+}
+
 function renderStepReview(container) {
-  const { title, listName, sections, layout, access, specificPeople, formManagers, submissionType, conditions, dependentDropdowns, governance: g } = AppState.builderForm;
+  const { title, listName, sections, layout, access, specificPeople, formManagers, submissionType, conditions, dependentDropdowns, governance: g, submitNotifyEmails, notifySubmitter } = AppState.builderForm;
   const allFields = getAllFields();
 
   // Human-readable labels for governance select values
@@ -1380,6 +1438,23 @@ function renderStepReview(container) {
               <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);margin-bottom:4px;">Continuity Plan</div>
               <div style="font-size:13.5px;color:var(--text2);">${g.continuityPlan}</div>
             </div>` : "")}
+          </div>
+        </div>
+      </div>
+
+      <!-- On Submit summary -->
+      <div class="card">
+        <div class="card-header"><div class="card-title">On Submit</div></div>
+        <div class="card-body">
+          <div class="grid-2" style="gap:24px;">
+            <div>
+              <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);margin-bottom:4px;">Submitter Confirmation</div>
+              <div>${notifySubmitter ? "✓ Confirmation email enabled" : "Disabled"}</div>
+            </div>
+            <div>
+              <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);margin-bottom:4px;">Notify on Submit</div>
+              <div>${submitNotifyEmails || "—"}</div>
+            </div>
           </div>
         </div>
       </div>
