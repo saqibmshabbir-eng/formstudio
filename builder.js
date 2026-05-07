@@ -1355,10 +1355,10 @@ function renderStepOnSubmit(container) {
         <!-- Notify addresses -->
         <div class="form-group">
           <label for="onsubmit-notify-emails" style="color:var(--text1);font-weight:500;">Notification emails</label>
-          <input id="onsubmit-notify-emails" class="input" type="text"
+          ${safeHtml(`<input id="onsubmit-notify-emails" class="input" type="text"
             placeholder="e.g. admin@example.com, team@example.com"
             value="${escAttr(submitNotifyEmails)}"
-            oninput="AppState.builderForm.submitNotifyEmails = this.value">
+            oninput="AppState.builderForm.submitNotifyEmails = this.value">`)}
           <div style="font-size:12px;color:var(--text3);margin-top:4px;">
             Comma-separated. Leave blank to skip. These addresses are notified every time the form is submitted.
           </div>
