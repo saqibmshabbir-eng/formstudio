@@ -60,6 +60,7 @@ async function graphPatch(path, body) {
       Authorization: "Bearer " + token,
       "Content-Type": "application/json",
       "Prefer": "HonorNonIndexedQueriesWarningMayFailRandomly",
+      "If-Match": "*",
     },
     body: JSON.stringify(body)
   });
