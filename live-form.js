@@ -1017,7 +1017,7 @@ async function submitLiveForm(liveFormItemId, listName, editItemId) {
     // Inject DeptEmail values from the form definition for managerOnly+notify sections.
     // These are never entered by the user — they come from sec.deptEmail set in the builder.
     // Written once at submission time so doSectionComplete can read them from the SP item.
-    for (const sec of (def.sections || [])) {
+    for (const sec of (state.def?.sections || [])) {
       if (!sec.managerOnly || !sec.notify || !sec.deptEmail) continue;
       const deptEmailField = sec.fields.find(f => f.system && f.systemRole === "DeptEmail");
       const colName = deptEmailField?.internalName || `${sectionKey(sec)}_DeptEmail`;
