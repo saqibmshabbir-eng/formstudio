@@ -1140,6 +1140,9 @@ async function submitLiveForm(liveFormItemId, listName, editItemId) {
       hideProgress();
       showToast("success", "Changes saved successfully!");
     } else {
+      // Write SubmissionStatus on new submissions — "Submitted" is the initial state.
+      // Existing lists without this column will silently ignore the field (Graph ignores unknown columns).
+      submitFields[CONFIG.COL_SUBMISSION_STATUS] = "Submitted";
       const newItem = await createListItem(listName, submitFields);
       const spItemId = await getSpItemId(listName, newItem.id);
       await patchPersonFields(spItemId);
@@ -1408,24 +1411,48 @@ async function sendOnSubmitEmails(def, formValues, allFields, fieldColNames) {
 // =============================================================
 
 function openSectionCompleteModal(secId, key, listName, itemId, deptEmailColName) {
+  // Determine if this is a Process Completion section
+  const state = window._liveFormState;
+  const section = (state?.def?.sections || []).find(s => s.id === secId);
+  const isProcessCompletion = !!section?.processCompletion;
+
   openModal(html`
     <div class="modal-header">
-      <span class="modal-title">Mark Section Complete</span>
+      <span class="modal-title">${isProcessCompletion ? "Process Completion Decision" : "Mark Section Complete"}</span>
       <button class="btn btn-ghost btn-icon btn-sm" onclick="closeModal()">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 1l12 12M13 1L1 13"/></svg>
       </button>
     </div>
     <div class="modal-body">
       <p style="color:var(--text2);font-size:13.5px;margin-bottom:16px;">
-        This will mark this section as complete and notify the relevant team.
-        This action cannot be undone.
+        ${isProcessCompletion
+          ? "This will record the final decision on this submission and cannot be undone."
+          : "This will mark this section as complete and notify the relevant team. This action cannot be undone."}
       </p>
+      ${safeHtml(isProcessCompletion ? `
+        <div class="form-group">
+          <label for="section-complete-decision" style="font-weight:600;">Decision</label>
+          <select id="section-complete-decision" class="select">
+            <option value="Processed &amp; Approved">Approved</option>
+            <option value="Processed &amp; Declined">Declined</option>
+          </select>
+        </div>
+      ` : "")}
       <div class="form-group">
         <label for="section-complete-comment" style="font-weight:600;">Comment</label>
         <textarea id="section-complete-comment" class="textarea" style="min-height:90px;"
-          placeholder="e.g. Work completed — ready for Dept B review"></textarea>
+          placeholder="${isProcessCompletion ? "e.g. Approved — all requirements met" : "e.g. Work completed — ready for Dept B review"}"></textarea>
         <span class="input-hint">This comment will be included in the notification email.</span>
       </div>
+      ${safeHtml(isProcessCompletion ? `
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13.5px;">
+            <input type="checkbox" id="section-complete-notify-submitter">
+            Include comment in notification to submitter
+          </label>
+          <span class="input-hint" style="margin-left:0;">Sends a decision notification email to the person who submitted this form.</span>
+        </div>
+      ` : "")}
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
@@ -1435,20 +1462,28 @@ function openSectionCompleteModal(secId, key, listName, itemId, deptEmailColName
         data-listname="${listName}"
         data-itemid="${itemId}"
         data-deptemailcol="${deptEmailColName}"
+        data-processcompletion="${isProcessCompletion}"
         onclick="doSectionComplete(this)">
-        Confirm Complete
+        ${isProcessCompletion ? "Confirm Decision" : "Confirm Complete"}
       </button>
     </div>
   `);
 }
 
 async function doSectionComplete(btn) {
-  const secId         = btn.dataset.secid;
-  const key           = btn.dataset.key;
-  const listName      = btn.dataset.listname;
-  const itemId        = btn.dataset.itemid;
-  const deptEmailCol  = btn.dataset.deptemailcol;
-  const comment       = document.getElementById("section-complete-comment")?.value?.trim() || "";
+  const secId             = btn.dataset.secid;
+  const key               = btn.dataset.key;
+  const listName          = btn.dataset.listname;
+  const itemId            = btn.dataset.itemid;
+  const deptEmailCol      = btn.dataset.deptemailcol;
+  const isProcessCompletion = btn.dataset.processcompletion === "true";
+  const comment           = document.getElementById("section-complete-comment")?.value?.trim() || "";
+  const decision          = isProcessCompletion
+    ? (document.getElementById("section-complete-decision")?.value || "Processed & Approved")
+    : null;
+  const notifySubmitter   = isProcessCompletion
+    ? document.getElementById("section-complete-notify-submitter")?.checked === true
+    : false;
 
   closeModal();
 
@@ -1467,7 +1502,7 @@ async function doSectionComplete(btn) {
     const now         = new Date().toISOString();
     const displayName = AppState.currentUser?.displayName || AppState.currentUser?.email || "Unknown";
 
-    // Build the fields to write — 4 system columns + the comment column
+    // Build the fields to write — system completion columns
     const completionFields = {
       [`${key}_Completed`]:        true,
       [`${key}_CompletedDate`]:    now,
@@ -1475,45 +1510,45 @@ async function doSectionComplete(btn) {
       [`${key}_CompletedComment`]: comment,
     };
 
+    // Process Completion sections also write the submission-level status
+    if (isProcessCompletion && decision) {
+      completionFields[CONFIG.COL_SUBMISSION_STATUS] = decision;
+    }
+
     await updateListItem(listName, itemId, completionFields);
 
-    // ── Fire notification email ──────────────────────────────────
-    // Read the DeptEmail value from the current SP item.
-    // We use the prefillValues already loaded — or re-fetch if needed.
+    // ── Re-fetch the SP item for email content and submitter info ────
     updateProgress("Sending notification…");
-
-    // Get the DeptEmail value from the saved item
-    const siteId    = await getSiteId();
+    const siteId     = await getSiteId();
     const dataListId = await getListId(listName);
-    const spItem    = await graphGet(
-      `/sites/${siteId}/lists/${dataListId}/items/${itemId}?expand=fields`
+    const spItem     = await graphGet(
+      `/sites/${siteId}/lists/${dataListId}/items/${itemId}?expand=fields,createdBy`
     );
-    const deptEmailRaw = spItem?.fields?.[deptEmailCol] || "";
 
-    // Parse comma-separated emails — trim each, filter empty strings
-    const recipients = deptEmailRaw
+    const deptEmailRaw = spItem?.fields?.[deptEmailCol] || "";
+    const recipients   = deptEmailRaw
       .split(",")
       .map(e => e.trim())
       .filter(e => e.includes("@"));
 
+    const formTitle    = formMeta.Title || def.title || "Form";
+    const sectionTitle = section.title || key;
+    const completedAt  = new Date(now).toLocaleString("en-GB", {
+      day: "2-digit", month: "short", year: "numeric",
+      hour: "2-digit", minute: "2-digit"
+    });
+    const appUrl      = (CONFIG.APP_URL || "").replace(/\/$/, "");
+    const formId      = state.liveFormItemId;
+    const openThisUrl = `${appUrl}?view=my-forms&formId=${encodeURIComponent(formId)}&itemId=${encodeURIComponent(itemId)}`;
+    const openAllUrl  = `${appUrl}?view=my-forms&formId=${encodeURIComponent(formId)}`;
+    const sectionTable = buildEmailSectionTable(section, spItem?.fields || {});
+
+    // ── 1) Dept notification email (same as before) ──────────────
     if (recipients.length) {
-      const appUrl      = (CONFIG.APP_URL || "").replace(/\/$/, "");
-      const formId      = state.liveFormItemId;
-      const openThisUrl = `${appUrl}?view=my-forms&formId=${encodeURIComponent(formId)}&itemId=${encodeURIComponent(itemId)}`;
-      const openAllUrl  = `${appUrl}?view=my-forms&formId=${encodeURIComponent(formId)}`;
-      const formTitle   = formMeta.Title || def.title || "Form";
-      const sectionTitle = section.title || key;
-      const completedAt  = new Date(now).toLocaleString("en-GB", {
-        day: "2-digit", month: "short", year: "numeric",
-        hour: "2-digit", minute: "2-digit"
-      });
-
-      // Build section field table from the re-fetched SP item
-      const sectionTable = buildEmailSectionTable(section, spItem?.fields || {});
-
       const bodyHtml = `
         <p style="font-size:15px;line-height:1.7;color:#333333;margin:0 0 20px;font-family:Arial,sans-serif;">
           <strong>${escHtml(displayName)}</strong> has marked the <strong>${escHtml(sectionTitle)}</strong> section as complete on ${completedAt}.
+          ${isProcessCompletion ? `Decision: <strong>${escHtml(decision)}</strong>.` : ""}
         </p>
 
         ${comment ? `
@@ -1567,8 +1602,60 @@ async function doSectionComplete(btn) {
       });
     }
 
+    // ── 2) Submitter decision notification (Process Completion only) ─
+    if (isProcessCompletion && notifySubmitter) {
+      const submitterEmail = spItem?.createdBy?.user?.email || "";
+      if (submitterEmail) {
+        const decisionLabel = decision === "Processed & Approved" ? "Approved" : "Declined";
+        const decisionColor = decision === "Processed & Approved" ? "#22c55e" : "#ef4444";
+        const bodyHtml = `
+          <p style="font-size:15px;line-height:1.7;color:#333333;margin:0 0 20px;font-family:Arial,sans-serif;">
+            Your submission for <strong>${escHtml(formTitle)}</strong> has been reviewed.
+          </p>
+          <table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 20px;">
+            <tr>
+              <td style="background-color:#f4f4f2;border-left:4px solid ${decisionColor};padding:10px 14px;font-size:15px;color:#333333;font-family:Arial,sans-serif;font-weight:600;">
+                Decision: ${escHtml(decisionLabel)}
+              </td>
+            </tr>
+          </table>
+          ${comment ? `
+          <table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 20px;">
+            <tr>
+              <td style="background-color:#f4f4f2;border-left:4px solid #00274d;padding:10px 14px;font-size:14px;color:#333333;font-family:Arial,sans-serif;">
+                <strong style="font-size:11px;font-weight:bold;letter-spacing:1px;text-transform:uppercase;color:#00274d;display:block;margin-bottom:4px;">Comment</strong>
+                "${escHtml(comment)}"
+              </td>
+            </tr>
+          </table>` : ""}
+          <p style="font-size:13px;color:#555555;font-family:Arial,sans-serif;">This decision was recorded by ${escHtml(displayName)} on ${completedAt}.</p>`;
+
+        try {
+          await graphPost(`/me/sendMail`, {
+            message: {
+              subject: `[Form Studio] ${formTitle} — submission ${decisionLabel.toLowerCase()}`,
+              body: { contentType: "HTML", content: buildEmailHtml({
+                headerLabel: formTitle,
+                subheading:  `Submission ${decisionLabel.toLowerCase()}`,
+                bodyHtml,
+              })},
+              toRecipients: [{ emailAddress: { address: submitterEmail } }],
+            },
+            saveToSentItems: false,
+          });
+        } catch (e) {
+          console.error("[doSectionComplete] Submitter notification failed:", e.message);
+          showToast("warn", "Decision saved but submitter notification failed: " + e.message);
+        }
+      }
+    }
+
     hideProgress();
-    showToast("success", "Section marked complete" + (recipients.length ? " — notification sent" : ""));
+    showToast("success",
+      isProcessCompletion
+        ? `Submission ${decision === "Processed & Approved" ? "approved" : "declined"}${notifySubmitter ? " — submitter notified" : ""}`
+        : "Section marked complete" + (recipients.length ? " — notification sent" : "")
+    );
 
     // Reload the form to show the completion panel instead of the button
     openLiveForm(state.liveFormItemId, itemId);

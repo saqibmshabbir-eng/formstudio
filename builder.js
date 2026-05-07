@@ -462,6 +462,19 @@ function renderSectionBlock(sec, si) {
     </label>
   ` : "";
 
+  // Process Completion toggle — only available on managerOnly + notify sections.
+  // When enabled, the section Complete button records a final Approved/Declined
+  // decision and writes SubmissionStatus on the data list item.
+  const processCompletionToggle = (sec.managerOnly && sec.notify) ? `
+    <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:${sec.processCompletion ? "var(--accent)" : "var(--text2)"};cursor:pointer;white-space:nowrap;border-left:1px solid var(--border);padding-left:10px;font-weight:${sec.processCompletion ? "600" : "500"};"
+      title="When enabled, completing this section records a final Approved/Declined decision on the submission">
+      <input type="checkbox" style="width:13px;height:13px;cursor:pointer;accent-color:var(--accent);" data-si="${si}"
+        ${sec.processCompletion ? "checked" : ""}
+        onchange="AppState.builderForm.sections[+this.dataset.si].processCompletion=this.checked;renderStepSections(document.getElementById('wizard-step-content'))">
+      Process Completion
+    </label>
+  ` : "";
+
   const notifyRow = (sec.managerOnly && sec.notify) ? `
     <div class="section-notify-row">
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M2 4l6 5 6-5M2 4h12v9a1 1 0 01-1 1H3a1 1 0 01-1-1V4z"/></svg>
@@ -486,6 +499,7 @@ function renderSectionBlock(sec, si) {
         : sec.notify
           ? `&nbsp;·&nbsp;<span style="color:var(--red,#ef4444);">⚠ No notification emails set</span>`
           : ""}
+      ${sec.processCompletion ? `&nbsp;·&nbsp;✓ Process Completion` : ""}
     </div>
   ` : "";
 
@@ -508,6 +522,7 @@ function renderSectionBlock(sec, si) {
         </label>
 
         ${safeHtml(notifyToggle)}
+        ${safeHtml(processCompletionToggle)}
 
         <button class="btn btn-ghost btn-sm btn-icon" data-si="${si}" onclick="removeSection(+this.dataset.si)" aria-label="Remove section">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>
@@ -678,10 +693,11 @@ function toggleManagerOnly(si, checked) {
       section.fields.push(...buildSystemFields(section));
     }
   } else {
-    // Turning off managerOnly also resets notify — workflow makes no
+    // Turning off managerOnly also resets notify and processCompletion — workflow makes no
     // sense on a public section
     section.notify    = false;
     section.deptEmail = "";
+    section.processCompletion = false;
     section.fields    = section.fields.filter(f => !f.system);
   }
 
@@ -700,8 +716,9 @@ function toggleSectionNotify(si, checked) {
   if (checked) {
     section.fields.push(...buildSystemFields(section));
   } else {
-    // Turning notify off clears the email list — no orphaned config
+    // Turning notify off clears the email list and processCompletion — no orphaned config
     section.deptEmail = "";
+    section.processCompletion = false;
   }
 
   renderStepSections(document.getElementById("wizard-step-content"));

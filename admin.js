@@ -800,6 +800,20 @@ async function doCreateSharePointList(listName, def, access, authorEmail = null)
     console.warn("AssignedToEmail column failed:", e.message);
   }
 
+  // Add SubmissionStatus plain text column — tracks the processing state of each
+  // submission. Written as "Submitted" on initial submission, then updated to
+  // "Processed & Approved" or "Processed & Declined" by the Process Completion
+  // section complete action. Never written to by the form submitter.
+  try {
+    await graphPost(`/sites/${siteId}/lists/${newListId}/columns`, {
+      name: CONFIG.COL_SUBMISSION_STATUS,
+      displayName: "Submission Status",
+      text: {},
+    });
+  } catch (e) {
+    console.warn("SubmissionStatus column failed:", e.message);
+  }
+
   // ── System columns for Form Manager (managerOnly) sections ──────────────
   // For every managerOnly section we provision 4 protected columns:
   //   {key}_DeptEmail      Text     — comma-separated notification emails

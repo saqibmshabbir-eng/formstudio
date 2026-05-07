@@ -109,6 +109,17 @@ function statusBadge(status) {
   };
   return `<span class="badge ${map[status]||"badge-gray"}">${escHtml(status)}</span>`;
 }
+
+// Badge for submission-level processing status (SubmissionStatus column on data lists)
+function submissionStatusBadge(status) {
+  if (!status) return `<span style="color:var(--text3);font-size:12px;">—</span>`;
+  const map = {
+    "Submitted":            "badge-blue",
+    "Processed & Approved": "badge-green",
+    "Processed & Declined": "badge-red",
+  };
+  return `<span class="badge ${map[status] || "badge-gray"}">${escHtml(status)}</span>`;
+}
 // =============================================================
 // BOOT
 // =============================================================

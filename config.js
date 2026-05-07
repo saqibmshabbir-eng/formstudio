@@ -36,6 +36,7 @@ const CONFIG = {
   COL_IS_DELETED:       "IsDeleted",       // Yes/No — soft delete flag on data lists
   COL_ASSIGNED_TO:      "AssignedTo",      // Person — soft check-out: who currently "owns" a submission for editing
   COL_ASSIGNED_TO_EMAIL:"AssignedToEmail", // Text — email of the assigned user; written by the app alongside AssignedTo
+  COL_SUBMISSION_STATUS:"SubmissionStatus",// Text — submission processing status: Submitted, Processed & Approved, Processed & Declined
   COL_RETRO:         "Retro",          // Yes/No — marks an externally-owned SP list form
   COL_LIST_LOCATION: "ListLocation",   // Single line text — SP new item URL for retro forms
   COL_VIEW_URL:      "ViewUrl",        // Single line text — URL to view submissions for retro forms

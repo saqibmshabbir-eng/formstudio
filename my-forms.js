@@ -337,6 +337,7 @@ function renderSubmissionsTable(container) {
               <th style="cursor:pointer;" onclick="_subSortCol='Modified';_subSortAsc=(_subSortCol==='Modified'&&!_subSortAsc);renderSubmissionsTable(document.getElementById('main-content'))">
                 Submitted${arrow("Modified")}
               </th>
+              <th style="width:160px;">Status</th>
               ${safeHtml(hasFileUpload ? `<th style="width:40px;text-align:center;" title="Attachments"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13.5 8.5l-5.5 5.5a4 4 0 01-5.66-5.66l6-6a2.5 2.5 0 013.54 3.54l-6.01 6a1 1 0 01-1.41-1.41l5.5-5.5"/></svg></th>` : "")}
               <th style="width:160px;">Actions</th>
             </tr>
@@ -363,6 +364,9 @@ function renderSubmissionsTable(container) {
                       <td onclick="viewOrOpenSubmission('${item.id}','${_currentFormItem.id}',${isManager})">${formatFieldValue(f[field.internalName || field.label]).slice(0, 80)}</td>
                     `).join(""))}
                     <td onclick="viewOrOpenSubmission('${item.id}','${_currentFormItem.id}',${isManager})" style="color:var(--text2);font-size:12.5px;">${formatDate(f.Modified)}</td>
+                    <td onclick="viewOrOpenSubmission('${item.id}','${_currentFormItem.id}',${isManager})">
+                      ${safeHtml(submissionStatusBadge(f[CONFIG.COL_SUBMISSION_STATUS] || ""))}
+                    </td>
                     ${safeHtml(hasFileUpload ? `<td onclick="viewOrOpenSubmission('${item.id}','${_currentFormItem.id}',${isManager})" style="text-align:center;">
                       ${hasAttachment
                         ? `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="var(--accent)" stroke-width="1.5" title="Has attachment"><path d="M13.5 8.5l-5.5 5.5a4 4 0 01-5.66-5.66l6-6a2.5 2.5 0 013.54 3.54l-6.01 6a1 1 0 01-1.41-1.41l5.5-5.5"/></svg>`
