@@ -12,6 +12,11 @@ async function graphGet(path) {
       "Prefer": "HonorNonIndexedQueriesWarningMayFailRandomly",
     }
   });
+  if (res.status === 401) {
+    // Session expired — redirect to login
+    await msalInstance.loginRedirect({ scopes: CONFIG.SCOPES });
+    return;
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err?.error?.message || `Graph error ${res.status} on ${path}`);
@@ -30,6 +35,10 @@ async function graphPost(path, body) {
     },
     body: JSON.stringify(body)
   });
+  if (res.status === 401) {
+    await msalInstance.loginRedirect({ scopes: CONFIG.SCOPES });
+    return;
+  }
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
     console.error("[graphPost error]", res.status, path, txt);
@@ -38,7 +47,8 @@ async function graphPost(path, body) {
     const detail = err?.error?.innererror?.message || err?.error?.message || `Graph error ${res.status} on ${path}`;
     throw new Error(detail);
   }
-  if (res.status === 204) return {};
+  // 202 Accepted (e.g. /me/sendMail) and 204 No Content both return empty bodies
+  if (res.status === 204 || res.status === 202) return {};
   return res.json();
 }
 
@@ -53,6 +63,10 @@ async function graphPatch(path, body) {
     },
     body: JSON.stringify(body)
   });
+  if (res.status === 401) {
+    await msalInstance.loginRedirect({ scopes: CONFIG.SCOPES });
+    return;
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err?.error?.message || `Graph error ${res.status} on ${path}`);
@@ -67,6 +81,10 @@ async function graphDelete(path) {
     method: "DELETE",
     headers: { Authorization: "Bearer " + token }
   });
+  if (res.status === 401) {
+    await msalInstance.loginRedirect({ scopes: CONFIG.SCOPES });
+    return;
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err?.error?.message || `Graph error ${res.status}`);

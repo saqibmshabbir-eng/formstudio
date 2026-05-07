@@ -63,7 +63,7 @@ const CONFIG = {
   DEBUG_LOGGING: true,
   // Base URL of this app — used to construct deep links in notification emails.
   // Must match the URL users access the app from. No trailing slash.
-  APP_URL: "https://uniofleicester.sharepoint.com/sites/rooms2/FormStudio",
+  APP_URL: "https://saqibmshabbir-eng.github.io/formstudio/",
 
   SCOPES: [
     "Sites.ReadWrite.All",

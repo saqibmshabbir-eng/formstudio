@@ -168,7 +168,7 @@ function formatFieldValue(val) {
   return String(val).replace(/<[^>]*>/g, "").trim() || "—";
 }
 
-async function openFormSubmissions(formItemId) {
+async function openFormSubmissions(formItemId, deepItemId = null) {
   const main = document.getElementById("main-content");
   main.innerHTML = `<div style="padding:60px;text-align:center;"><span class="spinner" style="width:32px;height:32px;border-width:3px;"></span></div>`;
 
@@ -187,9 +187,6 @@ async function openFormSubmissions(formItemId) {
     // authors and managers with Contribute see everything
     let rawItems;
     try {
-      // Use a direct graphGet so we can expand ClaimedBy as a full person object
-      // (Email, LookupValue). getListItems uses expand=fields which only returns
-      // programmatically-created Person columns as {ColumnName}LookupId strings.
       const siteId = await getSiteId();
       const listId = await getListId(listName);
       const data = await graphGet(
@@ -198,7 +195,6 @@ async function openFormSubmissions(formItemId) {
       );
       rawItems = data.value || [];
     } catch (e) {
-      // Graph returns 404 when the user lacks read access — not a missing list
       if (e.message?.includes("404") || e.message?.includes("not found")) {
         throw new Error(`Access denied to list "${listName}". You may need to be granted explicit permissions — try re-provisioning the form via the admin Edit flow.`);
       }
@@ -212,6 +208,15 @@ async function openFormSubmissions(formItemId) {
     _subPage    = 1;
 
     renderSubmissionsTable(main);
+
+    // If a specific submission was linked to, open it directly after the table renders.
+    // Managers get the full live form (Complete button available); others get the modal.
+    if (deepItemId) {
+      const currentEmail = (AppState.currentUser?.email || "").toLowerCase();
+      const isManager = AppState.isAdmin ||
+        (_currentFormDef?.formManagers || []).some(m => (m.email || "").toLowerCase() === currentEmail);
+      viewOrOpenSubmission(deepItemId, formItemId, isManager);
+    }
   } catch (e) {
     main.innerHTML = html`
       <div class="empty-state">

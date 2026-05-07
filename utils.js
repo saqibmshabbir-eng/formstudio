@@ -144,15 +144,17 @@ async function bootApp() {
 
     renderAppShell();
 
-    // Handle deep links — e.g. ?view=my-forms&formId=abc123
+    // Handle deep links — e.g. ?view=my-forms&formId=abc123&itemId=def456
     const params = new URLSearchParams(window.location.search);
     const deepView   = params.get("view");
     const deepFormId = params.get("formId");
+    const deepItemId = params.get("itemId");
     if (deepView === "my-forms" && deepFormId) {
-      // Navigate to my-forms view then drill straight into the form submissions
+      // Navigate to my-forms view then drill straight into the form submissions.
+      // If itemId is also present, open that specific submission directly.
       AppState.currentView = "my-forms";
       renderAppShell();
-      openFormSubmissions(deepFormId);
+      openFormSubmissions(deepFormId, deepItemId || null);
     } else if (deepView) {
       navigateTo(deepView);
     }
