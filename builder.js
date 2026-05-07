@@ -1358,7 +1358,7 @@ function renderStepOnSubmit(container) {
           <input id="onsubmit-notify-emails" class="input" type="text"
             placeholder="e.g. admin@example.com, team@example.com"
             value="${escAttr(submitNotifyEmails)}"
-            oninput="AppState.builderForm.submitNotifyEmails = this.value.trim()">
+            oninput="AppState.builderForm.submitNotifyEmails = this.value">
           <div style="font-size:12px;color:var(--text3);margin-top:4px;">
             Comma-separated. Leave blank to skip. These addresses are notified every time the form is submitted.
           </div>
@@ -1595,6 +1595,8 @@ async function loadFormIntoBuilder(itemId) {
     AppState.builderForm.listName           = def.listName           || generateListName(def.title);
     AppState.builderForm.access             = def.access             || "StaffStudents";
     AppState.builderForm.submissionType     = def.submissionType     || "Submit";
+    AppState.builderForm.submitNotifyEmails = def.submitNotifyEmails || "";
+    AppState.builderForm.notifySubmitter    = def.notifySubmitter    !== false; // default true
     AppState.builderForm.layout             = def.layout             || "single";
     AppState.builderForm.sections           = def.sections           || [];
     AppState.builderForm.conditions         = def.conditions         || [];
